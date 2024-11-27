@@ -887,10 +887,18 @@ namespace Fika.Core.Coop.GameMode
 			if (isServer)
 			{
 				bool spawnTogether = RaidSettings.PlayersSpawnPlace == EPlayersSpawnPlace.SamePlace;
+				bool spawnEnds = RaidSettings.PlayersSpawnPlace == EPlayersSpawnPlace.AtTheEndsOfTheMap;
 				if (spawnTogether)
 				{
 					Logger.LogInfo($"Setting spawn point to name: '{spawnPoint.Name}', id: '{spawnPoint.Id}'");
 					SpawnId = spawnPoint.Id;
+					NotificationManagerClass.DisplayMessageNotification("All players spawning together!", iconType: EFT.Communications.ENotificationIconType.Alert);
+				}
+				else if (spawnEnds)
+				{
+					Logger.LogInfo($"Setting spawn point to name: '{spawnPoint.Name}', id: '{spawnPoint.Id}'");
+					SpawnId = spawnPoint.Id;
+					NotificationManagerClass.DisplayMessageNotification("Using 2 teams/1v1 spawn points", iconType: EFT.Communications.ENotificationIconType.Alert);
 				}
 				else
 				{
@@ -926,6 +934,7 @@ namespace Fika.Core.Coop.GameMode
 							spawnPoint = spawnPointObject;
 						}
 					}
+					NotificationManagerClass.DisplayMessageNotification("You are going to spawn next to or near someone! Hold your fire!", iconType: EFT.Communications.ENotificationIconType.Alert);
 				}
 				else
 				{

@@ -52,25 +52,17 @@ namespace Fika.Core.EssentialPatches
 		public static void UpdateVersionLabel()
 		{
 			Traverse preloaderUiTraverse = Traverse.Create(MonoBehaviourSingleton<PreloaderUI>.Instance);
-			if (FikaPlugin.OfficialVersion.Value)
-			{
-				preloaderUiTraverse.Field("string_2").SetValue($"{officialVersion} Beta version");
-				versionNumberTraverse.Field("Major").SetValue(officialVersion);
-			}
-			else
-			{
 #if DEBUG
-				preloaderUiTraverse.Field("string_2").SetValue($"FIKA {fikaVersion} (DEBUG) | {versionLabel}");
+				preloaderUiTraverse.Field("string_2").SetValue($"MTC-C {fikaVersion} (DEBUG) | {versionLabel}");
 #else
-				preloaderUiTraverse.Field("string_2").SetValue($"FIKA {fikaVersion} | {versionLabel}");
+				preloaderUiTraverse.Field("string_2").SetValue($"{ColorizeText(EColor.BLUE, "MTC-C")} | {fikaVersion}");
 #endif
 				versionNumberTraverse.Field("Major").SetValue($"{fikaVersion} {versionLabel}");
-			}
 
 			// Game mode
-			//preloaderUiTraverse.Field("string_4").SetValue("PvE");
+			preloaderUiTraverse.Field("string_4").SetValue("Competitive PvP");
 			// Update version label
-			preloaderUiTraverse.Method("method_6").GetValue();
+			// preloaderUiTraverse.Method("method_6").GetValue();
 		}
 	}
 }
