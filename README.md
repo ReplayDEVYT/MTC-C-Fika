@@ -17,6 +17,8 @@ Client-side changes to make multiplayer work, with some added on PvP/Competitive
 
 The general plugin state is the same as Fika's. Very new module, this part hasn't been updated yet.
 
+We are currently on version 1.4.0 of MTC-C
+
 ## Contributing
 
 You are free to fork, improve and send PRs to improve the project. Please try
