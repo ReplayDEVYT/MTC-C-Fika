@@ -543,10 +543,7 @@ namespace Fika.Core.Coop.GameMode
 			}
 
 			coopBot.NetId = netId;
-			if (FikaPlugin.DisableBotMetabolism.Value)
-			{
-				coopBot.HealthController.DisableMetabolism();
-			}
+			coopBot.HealthController.DisableMetabolism();
 			coopHandler.Players.Add(coopBot.NetId, coopBot);
 
 			if (coopBot.PacketSender is BotPacketSender botSender)
