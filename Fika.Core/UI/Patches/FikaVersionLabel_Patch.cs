@@ -2,6 +2,7 @@
 using HarmonyLib;
 using SPT.Common.Http;
 using SPT.Common.Utils;
+using static Fika.Core.UI.FikaUIGlobals;
 using SPT.Custom.Models;
 using SPT.Reflection.Patching;
 using System.Reflection;
@@ -60,7 +61,7 @@ namespace Fika.Core.EssentialPatches
 				versionNumberTraverse.Field("Major").SetValue($"{fikaVersion} {versionLabel}");
 
 			// Game mode
-			preloaderUiTraverse.Field("string_4").SetValue("Competitive PvP");
+			preloaderUiTraverse.Field("string_3").SetValue("Competitive PvP");
 			// Update version label
 			// preloaderUiTraverse.Method("method_6").GetValue();
 		}

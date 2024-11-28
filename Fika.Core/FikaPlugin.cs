@@ -429,25 +429,25 @@ namespace Fika.Core
 			// Advanced
 
 			OfficialVersion = Config.Bind("Hidden", "Official Version", false,
-				new ConfigDescription("Show official version instead of Fika version.", tags: new ConfigurationManagerAttributes() { IsAdvanced = true }));
+				new ConfigDescription("Show official version instead of Fika version.", tags: new ConfigurationManagerAttributes() { Browsable = false }));
 
 			// Coop
 
 			ShowNotifications = Instance.Config.Bind("Hidden", "Show Feed", true,
-				new ConfigDescription("Enable custom notifications when a player dies, extracts, kills a boss, etc.", tags: new ConfigurationManagerAttributes() { Order = 7 }));
+				new ConfigDescription("Enable custom notifications when a player dies, extracts, kills a boss, etc.", tags: new ConfigurationManagerAttributes() { Browsable = false }));
 
 			AutoExtract = Config.Bind("Coop", "Auto Extract", false,
 				new ConfigDescription("Automatically extracts after the extraction countdown. As a host, this will only work if there are no clients connected.",
 				tags: new ConfigurationManagerAttributes() { Order = 6 }));
 
 			ShowExtractMessage = Config.Bind("Hidden", "Show Extract Message", true,
-				new ConfigDescription("Whether to show the extract message after dying/extracting.", tags: new ConfigurationManagerAttributes() { Order = 5 }));
+				new ConfigDescription("Whether to show the extract message after dying/extracting.", tags: new ConfigurationManagerAttributes() { Browsable = false }));
 
 			ExtractKey = Config.Bind("Coop", "Extract Key", new KeyboardShortcut(KeyCode.F8),
 				new ConfigDescription("The key used to extract from the raid.", tags: new ConfigurationManagerAttributes() { Order = 4 }));
 
 			EnableChat = Config.Bind("Coop", "Enable Chat", true,
-				new ConfigDescription("Toggle to enable chat in game. Cannot be change mid raid", tags: new ConfigurationManagerAttributes() { Order = 3 }));
+				new ConfigDescription("Toggle to enable chat in game. Cannot be change mid raid", tags: new ConfigurationManagerAttributes() { Browsable = false }));
 
 			ChatKey = Config.Bind("Coop", "Chat Key", new KeyboardShortcut(KeyCode.RightControl),
 				new ConfigDescription("The key used to open the chat window.", tags: new ConfigurationManagerAttributes() { Order = 2 }));
@@ -462,60 +462,60 @@ namespace Fika.Core
 			// Coop | Name Plates
 
 			UseNamePlates = Config.Bind("Hidden", "Show Player Name Plates", false,
-				new ConfigDescription("Toggle Health-Bars & Names.", tags: new ConfigurationManagerAttributes() { Order = 13 }));
+				new ConfigDescription("Toggle Health-Bars & Names.", tags: new ConfigurationManagerAttributes() { Browsable = false }));
 
 			HideHealthBar = Config.Bind("Hidden", "Hide Health Bar", false,
-				new ConfigDescription("Completely hides the health bar.", tags: new ConfigurationManagerAttributes() { Order = 12 }));
+				new ConfigDescription("Completely hides the health bar.", tags: new ConfigurationManagerAttributes() { Browsable = false }));
 
 			UseHealthNumber = Config.Bind("Hidden", "Show HP% instead of bar", false,
-				new ConfigDescription("Shows health in % amount instead of using the bar.", tags: new ConfigurationManagerAttributes() { Order = 11 }));
+				new ConfigDescription("Shows health in % amount instead of using the bar.", tags: new ConfigurationManagerAttributes() { Browsable = false }));
 
 			ShowEffects = Config.Bind("Hidden", "Show Effects", true,
-				new ConfigDescription("If status effects should be displayed below the health bar.", tags: new ConfigurationManagerAttributes() { Order = 10 }));
+				new ConfigDescription("If status effects should be displayed below the health bar.", tags: new ConfigurationManagerAttributes() { Browsable = false }));
 
 			UsePlateFactionSide = Config.Bind("Hidden", "Show Player Faction Icon", true,
-				new ConfigDescription("Shows the player faction icon next to the HP bar.", tags: new ConfigurationManagerAttributes() { Order = 9 }));
+				new ConfigDescription("Shows the player faction icon next to the HP bar.", tags: new ConfigurationManagerAttributes() { Browsable = false }));
 
 			HideNamePlateInOptic = Config.Bind("Hidden", "Hide Name Plate in Optic", true,
-				new ConfigDescription("Hides the name plate when viewing through PiP scopes.", tags: new ConfigurationManagerAttributes() { Order = 8 }));
+				new ConfigDescription("Hides the name plate when viewing through PiP scopes.", tags: new ConfigurationManagerAttributes() { Browsable = false }));
 
 			NamePlateUseOpticZoom = Config.Bind("Hidden", "Name Plates Use Optic Zoom", true,
-				new ConfigDescription("If name plate location should be displayed using the PiP optic camera.", tags: new ConfigurationManagerAttributes() { Order = 7, IsAdvanced = true }));
+				new ConfigDescription("If name plate location should be displayed using the PiP optic camera.", tags: new ConfigurationManagerAttributes() { Browsable = false }));
 
 			DecreaseOpacityNotLookingAt = Config.Bind("Hidden", "Decrease Opacity In Peripheral", true,
-				new ConfigDescription("Decreases the opacity of the name plates when not looking at a player.", tags: new ConfigurationManagerAttributes() { Order = 6 }));
+				new ConfigDescription("Decreases the opacity of the name plates when not looking at a player.", tags: new ConfigurationManagerAttributes() { Browsable = false }));
 
 			NamePlateScale = Config.Bind("Hidden", "Name Plate Scale", 0.22f,
-				new ConfigDescription("Size of the name plates", new AcceptableValueRange<float>(0.05f, 1f), new ConfigurationManagerAttributes() { Order = 5 }));
+				new ConfigDescription("Size of the name plates", new AcceptableValueRange<float>(0.05f, 1f), new ConfigurationManagerAttributes() { Browsable = false }));
 
 			OpacityInADS = Config.Bind("Hidden", "Opacity in ADS", 0.75f,
-				new ConfigDescription("The opacity of the name plates when aiming down sights.", new AcceptableValueRange<float>(0.1f, 1f), new ConfigurationManagerAttributes() { Order = 4 }));
+				new ConfigDescription("The opacity of the name plates when aiming down sights.", new AcceptableValueRange<float>(0.1f, 1f), new ConfigurationManagerAttributes() { Browsable = false }));
 
 			MaxDistanceToShow = Config.Bind("Hidden", "Max Distance to Show", 500f,
-				new ConfigDescription("The maximum distance at which name plates will become invisible, starts to fade at half the input value.", new AcceptableValueRange<float>(10f, 1000f), new ConfigurationManagerAttributes() { Order = 3 }));
+				new ConfigDescription("The maximum distance at which name plates will become invisible, starts to fade at half the input value.", new AcceptableValueRange<float>(10f, 1000f), new ConfigurationManagerAttributes() { Browsable = false }));
 
 			MinimumOpacity = Config.Bind("Hidden", "Minimum Opacity", 0.1f,
-				new ConfigDescription("The minimum opacity of the name plates.", new AcceptableValueRange<float>(0.0f, 1f), new ConfigurationManagerAttributes() { Order = 2 }));
+				new ConfigDescription("The minimum opacity of the name plates.", new AcceptableValueRange<float>(0.0f, 1f), new ConfigurationManagerAttributes() { Browsable = false }));
 
 			MinimumNamePlateScale = Config.Bind("Hidden", "Minimum Name Plate Scale", 0.01f,
-				new ConfigDescription("The minimum scale of the name plates.", new AcceptableValueRange<float>(0.0f, 1f), new ConfigurationManagerAttributes() { Order = 1 }));
+				new ConfigDescription("The minimum scale of the name plates.", new AcceptableValueRange<float>(0.0f, 1f), new ConfigurationManagerAttributes() { Browsable = false }));
 
 			UseOcclusion = Config.Bind("Hidden", "Use Occlusion", false,
-				new ConfigDescription("Use occlusion to hide the name plate when the player is out of sight.", tags: new ConfigurationManagerAttributes() { Order = 0 }));
+				new ConfigDescription("Use occlusion to hide the name plate when the player is out of sight.", tags: new ConfigurationManagerAttributes() { Browsable = false }));
 
 			// Coop | Quest Sharing
 
 			QuestTypesToShareAndReceive = Config.Bind("Hidden", "Quest Types", EQuestSharingTypes.All,
-				new ConfigDescription("Which quest types to receive and send. PlaceBeacon is both markers and items.", tags: new ConfigurationManagerAttributes() { Order = 3 }));
+				new ConfigDescription("Which quest types to receive and send. PlaceBeacon is both markers and items.", tags: new ConfigurationManagerAttributes() { Browsable = false }));
 
 			QuestSharingNotifications = Config.Bind("Hidden", "Show Notifications", true,
-				new ConfigDescription("If a notification should be shown when quest progress is shared with out.", tags: new ConfigurationManagerAttributes() { Order = 2 }));
+				new ConfigDescription("If a notification should be shown when quest progress is shared with out.", tags: new ConfigurationManagerAttributes() { Browsable = false }));
 
 			EasyKillConditions = Config.Bind("Hidden", "Easy Kill Conditions", false,
-				new ConfigDescription("Enables easy kill conditions. When this is used, any time a friendly player kills something, it treats it as if you killed it for your quests as long as all conditions are met.\nThis can be inconsistent and does not always work.", tags: new ConfigurationManagerAttributes() { Order = 1 }));
+				new ConfigDescription("Enables easy kill conditions. When this is used, any time a friendly player kills something, it treats it as if you killed it for your quests as long as all conditions are met.\nThis can be inconsistent and does not always work.", tags: new ConfigurationManagerAttributes() { Browsable = false }));
 
 			SharedBossExperience = Config.Bind("Hidden", "Shared Boss Experience", false,
-				new ConfigDescription("If enabled you will receive ½ of the experience when a friendly player kills a boss", tags: new ConfigurationManagerAttributes() { Order = 0 }));
+				new ConfigDescription("If enabled you will receive ½ of the experience when a friendly player kills a boss", tags: new ConfigurationManagerAttributes() { Browsable = false }));
 
 			// Coop | Pinginging
 
