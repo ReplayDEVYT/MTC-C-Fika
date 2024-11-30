@@ -61,7 +61,7 @@ namespace Fika.Core.EssentialPatches
 				versionNumberTraverse.Field("Major").SetValue($"{fikaVersion} {versionLabel}");
 
 			// Game mode
-			preloaderUiTraverse.Field("string_3").SetValue("Competitive PvP");
+			preloaderUiTraverse.Field("string_5").SetValue("Competitive PvP");
 			// Update version label
 			// preloaderUiTraverse.Method("method_6").GetValue();
 		}
