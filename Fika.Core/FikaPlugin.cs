@@ -232,6 +232,7 @@ namespace Fika.Core
 			SetupConfigEventHandlers();
 
 			DisableSPTPatches();
+			FixSPTBugPatches();
 			EnableOverridePatches();
 
 			GetClientConfig();
@@ -724,6 +725,7 @@ namespace Fika.Core
 			{
 				new FixAirdropCrashPatch().Disable();
 				new FixAirdropCrashPatch_Override().Enable();
+				new FixVFSDeleteFilePatch().Enable();
 			}
 		}
 
