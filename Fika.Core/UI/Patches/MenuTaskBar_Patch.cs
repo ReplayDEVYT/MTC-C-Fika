@@ -45,7 +45,7 @@ namespace Fika.Core.UI.Patches
 					LocalizedText text = downloadProfileGameObject.GetComponentInChildren<LocalizedText>();
 					if (text != null)
 					{
-						text.method_2(LocaleUtils.UI_DOWNLOAD_PROFILE.Localized());
+						text.method_2("DL PROFILE (FOR HOSTS)");
 						text.LocalizationKey = "";
 					}
 

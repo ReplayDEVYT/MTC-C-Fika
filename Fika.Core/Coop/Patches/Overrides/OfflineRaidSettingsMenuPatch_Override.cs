@@ -88,7 +88,14 @@ namespace Fika.Core.Coop.Patches
 				Label = "Random",
 				Enabled = true
 			});
-			____playersSpawnPlaceDropdown.SetTextInternal("Together");
+			labelList.Add(new()
+			{
+				Label = "2 Teams/1v1",
+				Enabled = false
+			});
+			____playersSpawnPlaceDropdown.SetTextInternal("Random");
+			____playersSpawnPlaceDropdown.CurrentIndex = 1;
+			____playersSpawnPlaceDropdown.UpdateValue(1, true, null, null);
 
 			instance = __instance;
 
