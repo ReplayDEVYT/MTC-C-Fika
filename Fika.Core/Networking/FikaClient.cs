@@ -1,14 +1,15 @@
-﻿// © 2024 Lacyway All Rights Reserved
+﻿// © 2025 Lacyway All Rights Reserved
 
 using BepInEx.Logging;
 using Comfort.Common;
+using Dissonance;
+using Dissonance.Integrations.MirrorIgnorance;
 using EFT;
 using EFT.AssetsManager;
 using EFT.Communications;
 using EFT.GlobalEvents;
 using EFT.Interactive;
 using EFT.InventoryLogic;
-using EFT.SynchronizableObjects;
 using EFT.UI;
 using EFT.Vehicle;
 using Fika.Core.Coop.ClientClasses;
@@ -17,11 +18,15 @@ using Fika.Core.Coop.Custom;
 using Fika.Core.Coop.Factories;
 using Fika.Core.Coop.GameMode;
 using Fika.Core.Coop.ObservedClasses;
-using Fika.Core.Coop.ObservedClasses.Snapshotting;
+using Fika.Core.Coop.Patches.VOIP;
 using Fika.Core.Coop.Players;
 using Fika.Core.Coop.Utils;
+using Fika.Core.Jobs;
 using Fika.Core.Modding;
 using Fika.Core.Modding.Events;
+using Fika.Core.Networking.Packets;
+using Fika.Core.Networking.Packets.Backend;
+using Fika.Core.Networking.VOIP;
 using Fika.Core.Utils;
 using HarmonyLib;
 using LiteNetLib;
@@ -32,1349 +37,1258 @@ using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading.Tasks;
+using Unity.Jobs;
 using UnityEngine;
 
 namespace Fika.Core.Networking
 {
-	/// <summary>
-	/// Client used in P2P connections
-	/// </summary>
-	public class FikaClient : MonoBehaviour, INetEventListener, IFikaNetworkManager
-	{
-		public CoopPlayer MyPlayer;
-		public int Ping = 0;
-		public int ServerFPS = 0;
-		public int ReadyClients = 0;
-		public bool HostReady = false;
-		public bool HostLoaded = false;
-		public bool ReconnectDone = false;
-		public NetPeer ServerConnection { get; private set; }
-		public bool ExfilPointsReceived { get; private set; } = false;
-		public NetManager NetClient
-		{
-			get
-			{
-				return netClient;
-			}
-		}
-		public NetDataWriter Writer
-		{
-			get
-			{
-				return dataWriter;
-			}
-		}
-		public bool Started
-		{
-			get
-			{
-				if (netClient == null)
-				{
-					return false;
-				}
-				return netClient.IsRunning;
-			}
-		}
-		public int SendRate
-		{
-			get
-			{
-				return sendRate;
-			}
-		}
-		public CoopHandler CoopHandler
-		{
-			get
-			{
-				return coopHandler;
-			}
-			set
-			{
-				coopHandler = value;
-			}
-		}
-		public FikaClientWorld FikaClientWorld { get; set; }
+    /// <summary>
+    /// Client used to communicate with the <see cref="FikaServer"/>
+    /// </summary>
+    public class FikaClient : MonoBehaviour, INetEventListener, IFikaNetworkManager
+    {
+        public CoopPlayer MyPlayer;
+        public int Ping;
+        public int ServerFPS;
+        public int ReadyClients;
+        public bool HostReady;
+        public bool HostLoaded;
+        public bool ReconnectDone;
+        public NetPeer ServerConnection { get; private set; }
+        public NetManager NetClient
+        {
+            get
+            {
+                return netClient;
+            }
+        }
+        public NetDataWriter Writer
+        {
+            get
+            {
+                return dataWriter;
+            }
+        }
+        public bool Started
+        {
+            get
+            {
+                if (netClient == null)
+                {
+                    return false;
+                }
+                return netClient.IsRunning;
+            }
+        }
+        public int SendRate
+        {
+            get
+            {
+                return sendRate;
+            }
+        }
+        public CoopHandler CoopHandler
+        {
+            get
+            {
+                return coopHandler;
+            }
+            set
+            {
+                coopHandler = value;
+            }
+        }
 
-		private NetPacketProcessor packetProcessor = new();
-		private int sendRate;
-		private NetManager netClient;
-		private CoopHandler coopHandler;
-		private readonly ManualLogSource logger = BepInEx.Logging.Logger.CreateLogSource("Fika.Client");
-		private readonly NetDataWriter dataWriter = new();
-		private FikaChat fikaChat;
-		private string myProfileId;
+        internal FikaVOIPClient VOIPClient { get; set; }
 
-		public async void Init()
-		{
-			NetworkGameSession.Rtt = 0;
-			NetworkGameSession.LossPercent = 0;
+        public int NetId { get; set; }
+        public FikaClientWorld FikaClientWorld { get; set; }
+        public EPlayerSide RaidSide { get; set; }
+        public bool AllowVOIP { get; set; }
+        public List<PlayerStatePacket> Snapshots { get; set; }
+        public List<ObservedCoopPlayer> ObservedCoopPlayers { get; set; }
 
-			myProfileId = FikaBackendUtils.Profile.ProfileId;
+        private NetPacketProcessor packetProcessor;
+        private int sendRate;
+        private NetManager netClient;
+        private CoopHandler coopHandler;
+        private ManualLogSource logger;
+        private NetDataWriter dataWriter;
+        private FikaChat fikaChat;
+        private string myProfileId;
+        private Queue<BaseInventoryOperationClass> inventoryOperations;
+        private List<int> missingIds;
+        private JobHandle stateHandle;
 
-			packetProcessor.RegisterNestedType(FikaSerializationExtensions.PutRagdollStruct, FikaSerializationExtensions.GetRagdollStruct);
-			packetProcessor.RegisterNestedType(FikaSerializationExtensions.PutArtilleryStruct, FikaSerializationExtensions.GetArtilleryStruct);
-			packetProcessor.RegisterNestedType(FikaSerializationExtensions.PutGrenadeStruct, FikaSerializationExtensions.GetGrenadeStruct);
+        public async void Init()
+        {
+            netClient = new(this)
+            {
+                UnconnectedMessagesEnabled = true,
+                UpdateTime = 50,
+                NatPunchEnabled = false,
+                IPv6Enabled = false,
+                DisconnectTimeout = FikaPlugin.ConnectionTimeout.Value * 1000,
+                UseNativeSockets = FikaPlugin.NativeSockets.Value,
+                EnableStatistics = true,
+                MaxConnectAttempts = 5,
+                ReconnectDelay = 1 * 1000,
+                ChannelsCount = 2
+            };
 
-			packetProcessor.SubscribeNetSerializable<PlayerStatePacket>(OnPlayerStatePacketReceived);
-			packetProcessor.SubscribeNetSerializable<WeaponPacket>(OnWeaponPacketReceived);
-			packetProcessor.SubscribeNetSerializable<DamagePacket>(OnDamagePacketReceived);
-			packetProcessor.SubscribeNetSerializable<ArmorDamagePacket>(OnArmorDamagePacketReceived);
-			packetProcessor.SubscribeNetSerializable<InventoryPacket>(OnInventoryPacketReceived);
-			packetProcessor.SubscribeNetSerializable<CommonPlayerPacket>(OnCommonPlayerPacketReceived);
-			packetProcessor.SubscribeNetSerializable<AllCharacterRequestPacket>(OnAllCharacterRequestPacketReceived);
-			packetProcessor.SubscribeNetSerializable<InformationPacket>(OnInformationPacketReceived);
-			packetProcessor.SubscribeNetSerializable<HealthSyncPacket>(OnHealthSyncPacketReceived);
-			packetProcessor.SubscribeNetSerializable<GenericPacket>(OnGenericPacketReceived);
-			packetProcessor.SubscribeNetSerializable<ExfiltrationPacket>(OnExfiltrationPacketReceived);
-			packetProcessor.SubscribeNetSerializable<WeatherPacket>(OnWeatherPacketReceived);
-			packetProcessor.SubscribeNetSerializable<MinePacket>(OnMinePacketReceived);
-			packetProcessor.SubscribeNetSerializable<BorderZonePacket>(OnBorderZonePacketReceived);
-			packetProcessor.SubscribeNetSerializable<SendCharacterPacket>(OnSendCharacterPacketReceived);
-			packetProcessor.SubscribeNetSerializable<AssignNetIdPacket>(OnAssignNetIdPacketReceived);
-			packetProcessor.SubscribeNetSerializable<SyncNetIdPacket>(OnSyncNetIdPacketReceived);
-			packetProcessor.SubscribeNetSerializable<OperationCallbackPacket>(OnOperationCallbackPacketReceived);
-			packetProcessor.SubscribeNetSerializable<TextMessagePacket>(OnTextMessagePacketReceived);
-			packetProcessor.SubscribeNetSerializable<QuestConditionPacket>(OnQuestConditionPacketReceived);
-			packetProcessor.SubscribeNetSerializable<QuestItemPacket>(OnQuestItemPacketReceived);
-			packetProcessor.SubscribeNetSerializable<QuestDropItemPacket>(OnQuestDropItemPacketReceived);
-			packetProcessor.SubscribeNetSerializable<SpawnpointPacket>(OnSpawnPointPacketReceived);
-			packetProcessor.SubscribeNetSerializable<HalloweenEventPacket>(OnHalloweenEventPacketReceived);
-			packetProcessor.SubscribeNetSerializable<InteractableInitPacket>(OnInteractableInitPacketReceived);
-			packetProcessor.SubscribeNetSerializable<StatisticsPacket>(OnStatisticsPacketReceived);
-			packetProcessor.SubscribeNetSerializable<WorldLootPacket>(OnWorldLootPacketReceived);
-			packetProcessor.SubscribeNetSerializable<ReconnectPacket>(OnReconnectPacketReceived);
-			packetProcessor.SubscribeNetSerializable<SyncObjectPacket>(OnSyncObjectPacketReceived);
-			packetProcessor.SubscribeNetSerializable<SpawnSyncObjectPacket>(OnSpawnSyncObjectPacketReceived);
-			packetProcessor.SubscribeNetSerializable<BTRPacket>(OnBTRPacketReceived);
-			packetProcessor.SubscribeNetSerializable<BTRInteractionPacket>(OnBTRInteractionPacketReceived);
-			packetProcessor.SubscribeNetSerializable<TraderServicesPacket>(OnTraderServicesPacketReceived);
-			packetProcessor.SubscribeNetSerializable<FlareSuccessPacket>(OnFlareSuccessPacketReceived);
-			packetProcessor.SubscribeNetSerializable<BufferZonePacket>(OnBufferZonePacketReceived);
-			packetProcessor.SubscribeNetSerializable<ResyncInventoryIdPacket>(OnResyncInventoryIdPacketReceived);
-			packetProcessor.SubscribeNetSerializable<UsableItemPacket>(OnUsableItemPacketReceived);
-			packetProcessor.SubscribeNetSerializable<NetworkSettingsPacket>(OnNetworkSettingsPacketReceived);
-			packetProcessor.SubscribeNetSerializable<SyncTransitControllersPacket>(OnSyncTransitControllersPacketReceived);
-			packetProcessor.SubscribeNetSerializable<TransitEventPacket>(OnTransitEventPacketReceived);
-			packetProcessor.SubscribeNetSerializable<BotStatePacket>(OnBotStatePacketReceived);
-			packetProcessor.SubscribeNetSerializable<PingPacket>(OnPingPacketReceived);
-			packetProcessor.SubscribeNetSerializable<LootSyncPacket>(OnLootSyncPacketReceived);
-			packetProcessor.SubscribeNetSerializable<LoadingProfilePacket>(OnLoadingProfilePacketReceived);
-			packetProcessor.SubscribeNetSerializable<SideEffectPacket>(OnSideEffectPacketReceived);
-			packetProcessor.SubscribeReusable<WorldPacket>(OnWorldPacketReceived);
+            packetProcessor = new();
+            dataWriter = new();
+            logger = BepInEx.Logging.Logger.CreateLogSource("Fika.Client");
+            inventoryOperations = new();
+            missingIds = [];
+            Snapshots = new(128);
+            ObservedCoopPlayers = [];
+
+            Ping = 0;
+            ServerFPS = 0;
+            ReadyClients = 0;
+
+            NetworkGameSession.Rtt = 0;
+            NetworkGameSession.LossPercent = 0;
+
+            myProfileId = FikaBackendUtils.Profile.ProfileId;
+
+            RegisterPacketsAndTypes();
 
 #if DEBUG
-			AddDebugPackets();
-#endif
+            AddDebugPackets();
+#endif            
 
-			netClient = new(this)
-			{
-				UnconnectedMessagesEnabled = true,
-				UpdateTime = 15,
-				NatPunchEnabled = false,
-				IPv6Enabled = false,
-				DisconnectTimeout = FikaPlugin.ConnectionTimeout.Value * 1000,
-				UseNativeSockets = FikaPlugin.NativeSockets.Value,
-				EnableStatistics = true,
-				MaxConnectAttempts = 5,
-				ReconnectDelay = 1 * 1000
-			};
+            await NetManagerUtils.CreateCoopHandler();
 
-			await NetManagerUtils.CreateCoopHandler();
+            if (FikaBackendUtils.IsHostNatPunch)
+            {
+                NetManagerUtils.DestroyPingingClient();
+                netClient.Start(FikaBackendUtils.LocalPort); // NAT punching has to re-use the same local port
+            }
+            else
+            {
+                netClient.Start();
+            }
 
-			if (FikaBackendUtils.IsHostNatPunch)
-			{
-				NetManagerUtils.DestroyPingingClient();
-			}
+            string ip = FikaBackendUtils.RemoteIp;
+            int port = FikaBackendUtils.RemotePort;
+            string connectString = FikaBackendUtils.IsReconnect ? "fika.reconnect" : "fika.core";
 
-			netClient.Start(FikaBackendUtils.LocalPort);
+            if (string.IsNullOrEmpty(ip))
+            {
+                Singleton<PreloaderUI>.Instance.ShowErrorScreen("Network Error", "Unable to connect to the raid server. IP and/or Port was empty when requesting data!");
+            }
+            else
+            {
+                ServerConnection = netClient.Connect(ip, port, connectString);
+            }
+        }
 
-			string ip = FikaBackendUtils.RemoteIp;
-			int port = FikaBackendUtils.RemotePort;
-			string connectString = FikaBackendUtils.IsReconnect ? "fika.reconnect" : "fika.core";
+        async Task IFikaNetworkManager.InitializeVOIP()
+        {
+            GClass2042 voipHandler = FikaGlobals.VOIPHandler;
 
-			if (string.IsNullOrEmpty(ip))
-			{
-				Singleton<PreloaderUI>.Instance.ShowErrorScreen("Network Error", "Unable to connect to the raid server. IP and/or Port was empty when requesting data!");
-			}
-			else
-			{
-				ServerConnection = netClient.Connect(ip, port, connectString);
-			};
+            GClass1040 controller = Singleton<SharedGameSettingsClass>.Instance.Sound.Controller;
+            if (voipHandler.MicrophoneChecked)
+            {
+                controller.ResetVoipDisabledReason();
+                DissonanceComms.ClientPlayerId = FikaGlobals.GetProfile(RaidSide == EPlayerSide.Savage).ProfileId;
+                await GClass1578.LoadScene(AssetsManagerSingletonClass.Manager,
+                    GClass2078.DissonanceSetupScene, UnityEngine.SceneManagement.LoadSceneMode.Additive);
 
-			while (ServerConnection.ConnectionState != ConnectionState.Connected)
-			{
-				await Task.Delay(1 * 6000);
-				ServerConnection = netClient.Connect(ip, port, connectString);
-			}
+                MirrorIgnoranceCommsNetwork mirrorCommsNetwork;
+                do
+                {
+                    mirrorCommsNetwork = FindObjectOfType<MirrorIgnoranceCommsNetwork>();
+                    await Task.Yield();
+                } while (mirrorCommsNetwork == null);
 
-			FikaEventDispatcher.DispatchEvent(new FikaNetworkManagerCreatedEvent(this));
-		}
+                GameObject gameObj = mirrorCommsNetwork.gameObject;
+                FikaCommsNetwork commNet = gameObj.AddComponent<FikaCommsNetwork>();
+                Destroy(mirrorCommsNetwork);
 
-		private void OnWorldPacketReceived(WorldPacket packet)
-		{
-			GameWorld gameWorld = Singleton<GameWorld>.Instance;
-			if (gameWorld == null)
-			{
-				logger.LogError("OnWorldPacketReceived: GameWorld was null!");
-				return;
-			}
+                DissonanceComms_Start_Patch.IsReady = true;
+                gameObj.GetComponent<DissonanceComms>().Invoke("Start", 0);
+            }
+            else
+            {
+                controller.VoipDisabledByInitializationFail();
+            }
 
-			foreach (GStruct129 ragdollPacket in packet.RagdollPackets)
-			{
-				if (gameWorld.ObservedPlayersCorpses.TryGetValue(ragdollPacket.Id, out ObservedCorpse corpse))
-				{
-					corpse.ApplyNetPacket(ragdollPacket);
-				}
-			}
+            do
+            {
+                await Task.Yield();
+            } while (VOIPClient == null);
 
-			if (packet.ArtilleryPackets.Count > 0)
-			{
-				List<GStruct130> packets = packet.ArtilleryPackets;
-				gameWorld.ClientShellingController.SyncProjectilesStates(ref packets);
-			}
+            RegisterPacket<VOIPPacket>(OnVOIPPacketReceived);
 
-			foreach (GStruct131 throwablePacket in packet.ThrowablePackets)
-			{
-				GClass786<int, Throwable> grenades = gameWorld.Grenades;
-				if (grenades.TryGetByKey(throwablePacket.Id, out Throwable throwable))
-				{
-					throwable.ApplyNetPacket(throwablePacket);
-				}
-			}
+            return;
+        }
 
-			packet.Flush();
-		}
+        private void RegisterPacketsAndTypes()
+        {
+            RegisterCustomType(FikaSerializationExtensions.PutRagdollStruct, FikaSerializationExtensions.GetRagdollStruct);
+            RegisterCustomType(FikaSerializationExtensions.PutArtilleryStruct, FikaSerializationExtensions.GetArtilleryStruct);
+            RegisterCustomType(FikaSerializationExtensions.PutGrenadeStruct, FikaSerializationExtensions.GetGrenadeStruct);
+            RegisterCustomType(FikaSerializationExtensions.PutAirplaneDataPacketStruct, FikaSerializationExtensions.GetAirplaneDataPacketStruct);
+            RegisterCustomType(FikaSerializationExtensions.PutLootSyncStruct, FikaSerializationExtensions.GetLootSyncStruct);
 
-		private void OnSideEffectPacketReceived(SideEffectPacket packet)
-		{
+            RegisterPacket<PlayerStatePacket>(OnPlayerStatePacketReceived);
+            RegisterPacket<WeaponPacket>(OnWeaponPacketReceived);
+            RegisterPacket<DamagePacket>(OnDamagePacketReceived);
+            RegisterPacket<ArmorDamagePacket>(OnArmorDamagePacketReceived);
+            RegisterPacket<InventoryPacket>(OnInventoryPacketReceived);
+            RegisterPacket<CommonPlayerPacket>(OnCommonPlayerPacketReceived);
+            RegisterPacket<InformationPacket>(OnInformationPacketReceived);
+            RegisterPacket<HealthSyncPacket>(OnHealthSyncPacketReceived);
+            RegisterPacket<GenericPacket>(OnGenericPacketReceived);
+            RegisterPacket<SendCharacterPacket>(OnSendCharacterPacketReceived);
+            RegisterPacket<OperationCallbackPacket>(OnOperationCallbackPacketReceived);
+            RegisterPacket<TextMessagePacket>(OnTextMessagePacketReceived);
+            RegisterPacket<QuestConditionPacket>(OnQuestConditionPacketReceived);
+            RegisterPacket<QuestItemPacket>(OnQuestItemPacketReceived);
+            RegisterPacket<QuestDropItemPacket>(OnQuestDropItemPacketReceived);
+            RegisterPacket<HalloweenEventPacket>(OnHalloweenEventPacketReceived);
+            RegisterPacket<InteractableInitPacket>(OnInteractableInitPacketReceived);
+            RegisterPacket<StatisticsPacket>(OnStatisticsPacketReceived);
+            RegisterPacket<WorldLootPacket>(OnWorldLootPacketReceived);
+            RegisterPacket<ReconnectPacket>(OnReconnectPacketReceived);
+            RegisterPacket<SpawnSyncObjectPacket>(OnSpawnSyncObjectPacketReceived);
+            RegisterPacket<BTRPacket>(OnBTRPacketReceived);
+            RegisterPacket<BTRInteractionPacket>(OnBTRInteractionPacketReceived);
+            RegisterPacket<FlareSuccessPacket>(OnFlareSuccessPacketReceived);
+            RegisterPacket<BufferZonePacket>(OnBufferZonePacketReceived);
+            RegisterPacket<ResyncInventoryIdPacket>(OnResyncInventoryIdPacketReceived);
+            RegisterPacket<UsableItemPacket>(OnUsableItemPacketReceived);
+            RegisterPacket<NetworkSettingsPacket>(OnNetworkSettingsPacketReceived);
+            RegisterPacket<SyncTransitControllersPacket>(OnSyncTransitControllersPacketReceived);
+            RegisterPacket<TransitEventPacket>(OnTransitEventPacketReceived);
+            RegisterPacket<BotStatePacket>(OnBotStatePacketReceived);
+            RegisterPacket<PingPacket>(OnPingPacketReceived);
+            RegisterPacket<LoadingProfilePacket>(OnLoadingProfilePacketReceived);
+            RegisterPacket<SideEffectPacket>(OnSideEffectPacketReceived);
+            RegisterPacket<RequestPacket>(OnRequestPacketReceived);
+            RegisterPacket<CharacterSyncPacket>(OnCharacterSyncPacketReceived);
+            RegisterPacket<InraidQuestPacket>(OnInraidQuestPacketReceived);
+            RegisterPacket<EventControllerEventPacket>(OnEventControllerEventPacketReceived);
+            RegisterPacket<EventControllerInteractPacket>(OnEventControllerInteractPacketReceived);
+
+            RegisterReusable<WorldPacket>(OnWorldPacketReceived);
+        }
+
+        private void OnEventControllerInteractPacketReceived(EventControllerInteractPacket packet)
+        {
+            GameWorld gameWorld = Singleton<GameWorld>.Instance;
+            if (gameWorld != null && gameWorld.RunddansController is ClientRunddansController clientController)
+            {
+                if (coopHandler.Players.TryGetValue(packet.NetId, out CoopPlayer player))
+                {
+                    clientController.DestroyItem(player);
+                }
+            }
+        }
+
+        private void OnEventControllerEventPacketReceived(EventControllerEventPacket packet)
+        {
+            GameWorld gameWorld = Singleton<GameWorld>.Instance;
+            if (gameWorld != null && gameWorld.RunddansController is ClientRunddansController)
+            {
+                (packet.Event as RunddansStateEvent).PlayerId = MyPlayer.NetId;
+                packet.Event.Invoke();
+            }
+        }
+
+        private void OnInraidQuestPacketReceived(InraidQuestPacket packet)
+        {
+            if (coopHandler.Players.TryGetValue(packet.NetId, out CoopPlayer player))
+            {
+                if (player.AbstractQuestControllerClass is ObservedQuestController controller)
+                {
+                    controller.HandleInraidQuestPacket(packet);
+                }
+            }
+        }
+
+        private void OnCharacterSyncPacketReceived(CharacterSyncPacket packet)
+        {
+            missingIds.Clear();
+
+            if (coopHandler == null)
+            {
+                return;
+            }
+
+            if (packet.PlayerIds == null)
+            {
+                return;
+            }
+
+            coopHandler.CheckIds(packet.PlayerIds, missingIds);
+
+            if (missingIds.Count > 0)
+            {
+                RequestPacket request = new()
+                {
+                    PacketType = SubPacket.ERequestSubPacketType.CharacterSync,
+                    RequestSubPacket = new RequestSubPackets.RequestCharactersPacket(missingIds)
+                };
+
+                SendData(ref request, DeliveryMethod.ReliableOrdered);
+            }
+        }
+
+        private void OnVOIPPacketReceived(VOIPPacket packet)
+        {
+            VOIPClient.NetworkReceivedPacket(new(packet.Data));
+        }
+
+        private void OnRequestPacketReceived(RequestPacket packet)
+        {
+            packet.RequestSubPacket.HandleResponse();
+        }
+
+        private void OnWorldPacketReceived(WorldPacket packet)
+        {
+            GameWorld gameWorld = Singleton<GameWorld>.Instance;
+            if (gameWorld == null)
+            {
+                logger.LogError("OnNewWorldPacketReceived: GameWorld was null!");
+                return;
+            }
+
+            /*if (packet.RagdollPackets != null)
+            {
+                for (int i = 0; i < packet.RagdollPackets.Count; i++)
+                {
+                    RagdollPacketStruct ragdollPacket = packet.RagdollPackets[i];
+                    if (gameWorld.ObservedPlayersCorpses.TryGetValue(ragdollPacket.Id, out ObservedCorpse corpse) && corpse.HasRagdoll)
+                    {
+                        corpse.ApplyNetPacket(ragdollPacket);
+                        if (ragdollPacket.Done && !corpse.IsVisible())
+                        {
+                            corpse.ForceApplyTransformSync(ragdollPacket.TransformSyncs);
+                        }
+                    }
+                }
+            }*/
+
+            if (packet.ArtilleryPackets.Count > 0)
+            {
+                List<ArtilleryPacketStruct> packets = packet.ArtilleryPackets;
+                gameWorld.ClientShellingController.SyncProjectilesStates(ref packets);
+            }
+
+            for (int i = 0; i < packet.GrenadePackets.Count; i++)
+            {
+                GrenadeDataPacketStruct throwablePacket = packet.GrenadePackets[i];
+                GClass797<int, Throwable> grenades = gameWorld.Grenades;
+                if (grenades.TryGetByKey(throwablePacket.Id, out Throwable throwable))
+                {
+                    throwable.ApplyNetPacket(throwablePacket);
+                }
+            }
+
+            FikaClientWorld.SyncObjectPackets.AddRange(packet.SyncObjectPackets);
+            FikaClientWorld.LootSyncPackets.AddRange(packet.LootSyncStructs);
+
+            packet.Flush();
+        }
+
+        private void OnSideEffectPacketReceived(SideEffectPacket packet)
+        {
 #if DEBUG
-			logger.LogWarning("OnSideEffectPacketReceived: Received");
+            logger.LogWarning("OnSideEffectPacketReceived: Received");
 #endif
-			GameWorld gameWorld = Singleton<GameWorld>.Instance;
-			if (gameWorld == null)
-			{
-				logger.LogError("OnSideEffectPacketReceived: GameWorld was null!");
-				return;
-			}
+            GameWorld gameWorld = Singleton<GameWorld>.Instance;
+            if (gameWorld == null)
+            {
+                logger.LogError("OnSideEffectPacketReceived: GameWorld was null!");
+                return;
+            }
 
-			GStruct448<Item> gstruct2 = gameWorld.FindItemById(packet.ItemId);
-			if (gstruct2.Failed)
-			{
-				logger.LogError("OnSideEffectPacketReceived: " + gstruct2.Error);
-				return;
-			}
-			Item item = gstruct2.Value;
-			if (item.TryGetItemComponent(out SideEffectComponent sideEffectComponent))
-			{
-				sideEffectComponent.Value = packet.Value;
-				item.RaiseRefreshEvent(false, false);
-				return;
-			}
-			logger.LogError("OnSideEffectPacketReceived: SideEffectComponent was not found!");
-		}
+            GStruct457<Item> gstruct2 = gameWorld.FindItemById(packet.ItemId);
+            if (gstruct2.Failed)
+            {
+                logger.LogError("OnSideEffectPacketReceived: " + gstruct2.Error);
+                return;
+            }
+            Item item = gstruct2.Value;
+            if (item.TryGetItemComponent(out SideEffectComponent sideEffectComponent))
+            {
+                sideEffectComponent.Value = packet.Value;
+                item.RaiseRefreshEvent(false, false);
+                return;
+            }
+            logger.LogError("OnSideEffectPacketReceived: SideEffectComponent was not found!");
+        }
 
-		private void OnLoadingProfilePacketReceived(LoadingProfilePacket packet)
-		{
-			if (packet.Profiles != null)
-			{
+        private void OnLoadingProfilePacketReceived(LoadingProfilePacket packet)
+        {
+            if (packet.Profiles != null)
+            {
 #if DEBUG
-				logger.LogWarning($"OnLoadingProfilePacketReceived: Received {packet.Profiles.Count} profiles");
+                logger.LogWarning($"OnLoadingProfilePacketReceived: Received {packet.Profiles.Count} profiles");
 #endif
-				FikaBackendUtils.AddPartyMembers(packet.Profiles);
-				return;
-			}
+                FikaBackendUtils.AddPartyMembers(packet.Profiles);
+                return;
+            }
 
-			logger.LogWarning("OnLoadingProfilePacketReceived: Profiles was null!");
-		}
+            logger.LogWarning("OnLoadingProfilePacketReceived: Profiles was null!");
+        }
 
-		private void OnLootSyncPacketReceived(LootSyncPacket packet)
-		{
-			if (FikaClientWorld != null)
-			{
-				FikaClientWorld.LootSyncPackets.Add(packet.Data);
-			}
-		}
+        private void OnPingPacketReceived(PingPacket packet)
+        {
+            if (FikaPlugin.UsePingSystem.Value)
+            {
+                PingFactory.ReceivePing(packet.PingLocation, packet.PingType, packet.PingColor, packet.Nickname, packet.LocaleId);
+            }
+        }
 
-		private void OnPingPacketReceived(PingPacket packet)
-		{
-			if (FikaPlugin.UsePingSystem.Value)
-			{
-				PingFactory.ReceivePing(packet.PingLocation, packet.PingType, packet.PingColor, packet.Nickname, packet.LocaleId);
-			}
-		}
+        private void OnBotStatePacketReceived(BotStatePacket packet)
+        {
+            if (coopHandler.Players.TryGetValue(packet.NetId, out CoopPlayer bot))
+            {
+                switch (packet.Type)
+                {
+                    case BotStatePacket.EStateType.DisposeBot:
+                        {
+                            if (!bot.gameObject.activeSelf)
+                            {
+                                bot.gameObject.SetActive(true);
+                            }
 
-		private void OnBotStatePacketReceived(BotStatePacket packet)
-		{
-			if (coopHandler.Players.TryGetValue(packet.NetId, out CoopPlayer bot))
-			{
-				switch (packet.Type)
-				{
-					case BotStatePacket.EStateType.DisposeBot:
-						{
-							if (!bot.gameObject.activeSelf)
-							{
-								bot.gameObject.SetActive(true);
-							}
-
-							if (coopHandler.Players.Remove(packet.NetId))
-							{
-								bot.Dispose();
-								AssetPoolObject.ReturnToPool(bot.gameObject, true);
+                            if (coopHandler.Players.Remove(packet.NetId))
+                            {
+                                bot.Dispose();
+                                AssetPoolObject.ReturnToPool(bot.gameObject, true);
 #if DEBUG
-								logger.LogInfo("Disposing bot: " + packet.NetId);
+                                logger.LogInfo("Disposing bot: " + packet.NetId);
 #endif
-							}
-							else
-							{
-								logger.LogWarning("Unable to dispose of bot: " + packet.NetId);
-							}
-						}
-						break;
-					case BotStatePacket.EStateType.EnableBot:
-						{
-							if (!bot.gameObject.activeSelf)
-							{
+                            }
+                            else
+                            {
+                                logger.LogWarning("Unable to dispose of bot: " + packet.NetId);
+                            }
+                        }
+                        break;
+                    case BotStatePacket.EStateType.EnableBot:
+                        {
+                            if (!bot.gameObject.activeSelf)
+                            {
 #if DEBUG
-								logger.LogWarning("Enabling " + packet.NetId);
+                                logger.LogWarning("Enabling " + packet.NetId);
 #endif
-								bot.gameObject.SetActive(true);
-							}
-							else
-							{
-								logger.LogWarning($"Received packet to enable {bot.ProfileId}, netId {packet.NetId} but the bot was already enabled!");
-							}
-						}
-						break;
-					case BotStatePacket.EStateType.DisableBot:
-						{
-							if (bot.gameObject.activeSelf)
-							{
+                                bot.gameObject.SetActive(true);
+                            }
+                            else
+                            {
+                                logger.LogWarning($"Received packet to enable {bot.ProfileId}, netId {packet.NetId} but the bot was already enabled!");
+                            }
+                        }
+                        break;
+                    case BotStatePacket.EStateType.DisableBot:
+                        {
+                            if (bot.gameObject.activeSelf)
+                            {
 #if DEBUG
-								logger.LogWarning("Disabling " + packet.NetId);
+                                logger.LogWarning("Disabling " + packet.NetId);
 #endif
-								bot.gameObject.SetActive(false);
-							}
-							else
-							{
-								logger.LogWarning($"Received packet to disable {bot.ProfileId}, netId {packet.NetId} but the bot was already disabled!");
-							}
-						}
-						break;
-				}
-			}
-		}
+                                bot.gameObject.SetActive(false);
+                            }
+                            else
+                            {
+                                logger.LogWarning($"Received packet to disable {bot.ProfileId}, netId {packet.NetId} but the bot was already disabled!");
+                            }
+                        }
+                        break;
+                }
+            }
+        }
 
-		private void OnTransitEventPacketReceived(TransitEventPacket packet)
-		{
-			if (!(packet.EventType is TransitEventPacket.ETransitEventType.Init or TransitEventPacket.ETransitEventType.Extract))
-			{
-				packet.TransitEvent.Invoke();
-				return;
-			}
+        private void OnTransitEventPacketReceived(TransitEventPacket packet)
+        {
+            if (!(packet.EventType is TransitEventPacket.ETransitEventType.Init or TransitEventPacket.ETransitEventType.Extract))
+            {
+                packet.TransitEvent.Invoke();
+                return;
+            }
 
-			if (packet.EventType is TransitEventPacket.ETransitEventType.Init)
-			{
-				if (coopHandler.LocalGameInstance.GameWorld_0.TransitController is FikaClientTransitController transitController)
-				{
-					transitController.Init();
-					return;
-				}
-			}
+            if (packet.EventType is TransitEventPacket.ETransitEventType.Init)
+            {
+                if (coopHandler.LocalGameInstance.GameWorld_0.TransitController is FikaClientTransitController transitController)
+                {
+                    transitController.Init();
+                    return;
+                }
+            }
 
-			if (packet.EventType is TransitEventPacket.ETransitEventType.Extract)
-			{
-				if (coopHandler.LocalGameInstance.GameWorld_0.TransitController is FikaClientTransitController transitController)
-				{
-					transitController.HandleClientExtract(packet.TransitId, packet.PlayerId);
-					return;
-				}
-			}
+            if (packet.EventType is TransitEventPacket.ETransitEventType.Extract)
+            {
+                if (coopHandler.LocalGameInstance.GameWorld_0.TransitController is FikaClientTransitController transitController)
+                {
+                    transitController.HandleClientExtract(packet.TransitId, packet.PlayerId);
+                    return;
+                }
+            }
 
-			logger.LogError("OnTransitEventPacketReceived: TransitController was not FikaClientTransitController!");
-		}
+            logger.LogError("OnTransitEventPacketReceived: TransitController was not FikaClientTransitController!");
+        }
 
-		private void OnSyncTransitControllersPacketReceived(SyncTransitControllersPacket packet)
-		{
-			TransitControllerAbstractClass transitController = Singleton<GameWorld>.Instance.TransitController;
-			if (transitController != null)
-			{
-				transitController.summonedTransits[packet.ProfileId] = new(packet.RaidId, packet.Count, packet.Maps);
-				return;
-			}
+        private void OnSyncTransitControllersPacketReceived(SyncTransitControllersPacket packet)
+        {
+            TransitControllerAbstractClass transitController = Singleton<GameWorld>.Instance.TransitController;
+            if (transitController != null)
+            {
+                transitController.summonedTransits[packet.ProfileId] = new(packet.RaidId, packet.Count, packet.Maps, false);
+                return;
+            }
 
-			logger.LogError("OnSyncTransitControllersPacketReceived: TransitController was null!");
-		}
+            logger.LogError("OnSyncTransitControllersPacketReceived: TransitController was null!");
+        }
 
-		private void AddDebugPackets()
-		{
-			packetProcessor.SubscribeNetSerializable<SpawnItemPacket>(OnSpawnItemPacketReceived);
-		}
-
-		private void OnSpawnItemPacketReceived(SpawnItemPacket packet)
-		{
-			if (coopHandler.Players.TryGetValue(packet.NetId, out CoopPlayer playerToApply))
-			{
-				FikaGlobals.SpawnItemInWorld(packet.Item, playerToApply);
-			}
-		}
-
-		private void OnNetworkSettingsPacketReceived(NetworkSettingsPacket packet)
-		{
-			logger.LogInfo($"Received settings from server. SendRate: {packet.SendRate}");
-			sendRate = packet.SendRate;
-		}
-
-		private void OnUsableItemPacketReceived(UsableItemPacket packet)
-		{
-			if (coopHandler.Players.TryGetValue(packet.NetId, out CoopPlayer playerToApply))
-			{
-				playerToApply.HandleUsableItemPacket(packet);
-			}
-		}
-
-		private void OnResyncInventoryIdPacketReceived(ResyncInventoryIdPacket packet)
-		{
-			if (coopHandler.Players.TryGetValue(packet.NetId, out CoopPlayer playerToApply))
-			{
-				if (playerToApply is ObservedCoopPlayer observedPlayer)
-				{
-					if (observedPlayer.InventoryController is ObservedInventoryController observedController)
-					{
-						observedController.SetNewID(packet.MongoId.Value);
-					}
-					return;
-				}
-
-				if (playerToApply.IsYourPlayer)
-				{
-					ResyncInventoryIdPacket response = new(playerToApply.NetId)
-					{
-						MongoId = playerToApply.InventoryController.CurrentId
-					};
-					SendData(ref response, DeliveryMethod.ReliableOrdered);
-				}
-			}
-		}
-
-		private void OnBufferZonePacketReceived(BufferZonePacket packet)
-		{
-			switch (packet.Status)
-			{
-				case EFT.BufferZone.EBufferZoneData.Availability:
-				case EFT.BufferZone.EBufferZoneData.DisableByZryachiyDead:
-				case EFT.BufferZone.EBufferZoneData.DisableByPlayerDead:
-					{
-						BufferZoneControllerClass.Instance.SetInnerZoneAvailabilityStatus(packet.Available, packet.Status);
-					}
-					break;
-				case EFT.BufferZone.EBufferZoneData.PlayerAccessStatus:
-					{
-						BufferZoneControllerClass.Instance.SetPlayerAccessStatus(packet.ProfileId, packet.Available);
-					}
-					break;
-				case EFT.BufferZone.EBufferZoneData.PlayerInZoneStatusChange:
-					{
-						BufferZoneControllerClass.Instance.SetPlayerInZoneStatus(packet.ProfileId, packet.Available);
-					}
-					break;
-				default:
-					break;
-			}
-		}
-
-		private void OnFlareSuccessPacketReceived(FlareSuccessPacket packet)
-		{
-			if (Singleton<GameWorld>.Instance.MainPlayer.ProfileId == packet.ProfileId)
-			{
-				if (!packet.Success)
-				{
-					NotificationManagerClass.DisplayNotification(new GClass2269("AirplaneDelayMessage".Localized(null),
-								ENotificationDurationType.Default, ENotificationIconType.Default, null));
-				}
-			}
-		}
-
-		private void OnTraderServicesPacketReceived(TraderServicesPacket packet)
-		{
-			if (packet.Services.Count < 1)
-			{
-				logger.LogWarning("OnTraderServicesPacketReceived: Services was 0, but might be intentional. Skipping...");
-				return;
-			}
-
-			if (coopHandler.Players.TryGetValue(packet.NetId, out CoopPlayer playerToApply))
-			{
-				playerToApply.method_145(packet.Services);
-			}
-		}
-
-		private void OnBTRInteractionPacketReceived(BTRInteractionPacket packet)
-		{
-			if (coopHandler.Players.TryGetValue(packet.NetId, out CoopPlayer playerToApply))
-			{
-				GameWorld gameWorld = Singleton<GameWorld>.Instance;
-				if (gameWorld.BtrController != null && gameWorld.BtrController.BtrView != null)
-				{
-					if (packet.IsResponse && packet.Status != EBtrInteractionStatus.Confirmed)
-					{
-						if (packet.Status - EBtrInteractionStatus.Blacklisted <= 2 && playerToApply.IsYourPlayer)
-						{
-							GlobalEventHandlerClass.CreateEvent<BtrNotificationInteractionMessageEvent>().Invoke(playerToApply.PlayerId, packet.Status);
-							return;
-						}
-					}
-					gameWorld.BtrController.BtrView.Interaction(playerToApply, packet.Data);
-				}
-			}
-		}
-
-		private void OnSpawnSyncObjectPacketReceived(SpawnSyncObjectPacket packet)
-		{
-			GClass2400 processor = Singleton<GameWorld>.Instance.SynchronizableObjectLogicProcessor;
-			if (processor == null)
-			{
-				return;
-			}
-
-			switch (packet.ObjectType)
-			{
-				case SynchronizableObjectType.AirDrop:
-					{
-						AirdropSynchronizableObject syncObject = (AirdropSynchronizableObject)processor.TakeFromPool(SynchronizableObjectType.AirDrop);
-						syncObject.ObjectId = packet.ObjectId;
-						syncObject.AirdropType = packet.AirdropType;
-						LootableContainer container = syncObject.GetComponentInChildren<LootableContainer>().gameObject.GetComponentInChildren<LootableContainer>();
-						container.enabled = true;
-						container.Id = packet.ContainerId;
-						if (packet.NetId > 0)
-						{
-							container.NetId = packet.NetId;
-						}
-						Singleton<GameWorld>.Instance.RegisterWorldInteractionObject(container);
-						LootItem.CreateLootContainer(container, packet.AirdropItem, packet.AirdropItem.ShortName.Localized(null),
-								Singleton<GameWorld>.Instance, null);
-						if (!syncObject.IsStatic)
-						{
-							processor.InitSyncObject(syncObject, syncObject.transform.position, syncObject.transform.rotation.eulerAngles, syncObject.ObjectId);
-							return;
-						}
-						processor.InitStaticObject(syncObject);
-					}
-					break;
-				case SynchronizableObjectType.AirPlane:
-					{
-						AirplaneSynchronizableObject syncObject = (AirplaneSynchronizableObject)processor.TakeFromPool(SynchronizableObjectType.AirPlane);
-						syncObject.ObjectId = packet.ObjectId;
-						syncObject.transform.SetPositionAndRotation(packet.Position, packet.Rotation);
-						processor.InitSyncObject(syncObject, packet.Position, packet.Rotation.eulerAngles, packet.ObjectId);
-					}
-					break;
-				case SynchronizableObjectType.Tripwire:
-					{
-						if (Singleton<ItemFactoryClass>.Instance.CreateItem(packet.GrenadeId, packet.GrenadeTemplate, null) is not ThrowWeapItemClass grenadeClass)
-						{
-							logger.LogError("OnSpawnSyncObjectPacketReceived: Item with id " + packet.GrenadeId + " is not a grenade!");
-							return;
-						}
-
-						TripwireSynchronizableObject syncObject = (TripwireSynchronizableObject)processor.TakeFromPool(packet.ObjectType);
-						syncObject.ObjectId = packet.ObjectId;
-						syncObject.IsStatic = packet.IsStatic;
-						syncObject.transform.SetPositionAndRotation(packet.Position, packet.Rotation);
-						processor.InitSyncObject(syncObject, syncObject.transform.position, syncObject.transform.rotation.eulerAngles, syncObject.ObjectId);
-
-						syncObject.SetupGrenade(grenadeClass, packet.ProfileId, packet.Position, packet.ToPosition);
-						//processor.TripwireManager.AddTripwire(syncObject);
-					}
-					break;
-				default:
-					break;
-			}
-		}
-
-		private void OnSyncObjectPacketReceived(SyncObjectPacket packet)
-		{
-			CoopClientGameWorld gameWorld = (CoopClientGameWorld)Singleton<GameWorld>.Instance;
-			List<AirplaneDataPacketStruct> structs = [packet.Data];
-			gameWorld.ClientSynchronizableObjectLogicProcessor?.ProcessSyncObjectPackets(structs);
-		}
-
-		private void OnReconnectPacketReceived(ReconnectPacket packet)
-		{
-			if (!packet.IsRequest)
-			{
-				CoopGame coopGame = (CoopGame)Singleton<IFikaGame>.Instance;
-				if (coopGame == null)
-				{
-					return;
-				}
-
-				switch (packet.Type)
-				{
-					case ReconnectPacket.EReconnectDataType.Throwable:
-						if (packet.ThrowableData != null)
-						{
 #if DEBUG
-							logger.LogWarning("Received reconnect packet for throwables: " + packet.ThrowableData.Count);
+        private void AddDebugPackets()
+        {
+            RegisterPacket<SpawnItemPacket>(OnSpawnItemPacketReceived);
+        }
 #endif
-							string localizedString = LocaleUtils.UI_SYNC_THROWABLES.Localized();
-							coopGame.SetMatchmakerStatus(localizedString);
-							Singleton<GameWorld>.Instance.OnSmokeGrenadesDeserialized(packet.ThrowableData);
-						}
-						break;
-					case ReconnectPacket.EReconnectDataType.Interactives:
-						{
-							if (packet.InteractivesData != null)
-							{
+
+        private void OnSpawnItemPacketReceived(SpawnItemPacket packet)
+        {
+            if (coopHandler.Players.TryGetValue(packet.NetId, out CoopPlayer playerToApply))
+            {
+                FikaGlobals.SpawnItemInWorld(packet.Item, playerToApply);
+            }
+        }
+
+        private void OnNetworkSettingsPacketReceived(NetworkSettingsPacket packet)
+        {
+            logger.LogInfo($"Received settings from server. SendRate: {packet.SendRate}, NetId: {packet.NetId}, AllowVOIP: {packet.AllowVOIP}");
+            sendRate = packet.SendRate;
+            NetId = packet.NetId;
+            AllowVOIP = packet.AllowVOIP;
+        }
+
+        private void OnUsableItemPacketReceived(UsableItemPacket packet)
+        {
+            if (coopHandler.Players.TryGetValue(packet.NetId, out CoopPlayer playerToApply))
+            {
+                playerToApply.HandleUsableItemPacket(packet);
+            }
+        }
+
+        private void OnResyncInventoryIdPacketReceived(ResyncInventoryIdPacket packet)
+        {
+            if (coopHandler.Players.TryGetValue(packet.NetId, out CoopPlayer playerToApply))
+            {
+                if (playerToApply is ObservedCoopPlayer observedPlayer)
+                {
+                    if (observedPlayer.InventoryController is ObservedInventoryController observedController)
+                    {
+                        observedController.SetNewID(packet.MongoId.Value);
+                    }
+                    return;
+                }
+
+                if (playerToApply.IsYourPlayer)
+                {
+                    ResyncInventoryIdPacket response = new(playerToApply.NetId)
+                    {
+                        MongoId = playerToApply.InventoryController.CurrentId
+                    };
+                    SendData(ref response, DeliveryMethod.ReliableOrdered);
+                }
+            }
+        }
+
+        private void OnBufferZonePacketReceived(BufferZonePacket packet)
+        {
+            switch (packet.Status)
+            {
+                case EFT.BufferZone.EBufferZoneData.Availability:
+                case EFT.BufferZone.EBufferZoneData.DisableByZryachiyDead:
+                case EFT.BufferZone.EBufferZoneData.DisableByPlayerDead:
+                    {
+                        BufferZoneControllerClass.Instance.SetInnerZoneAvailabilityStatus(packet.Available, packet.Status);
+                    }
+                    break;
+                case EFT.BufferZone.EBufferZoneData.PlayerAccessStatus:
+                    {
+                        BufferZoneControllerClass.Instance.SetPlayerAccessStatus(packet.ProfileId, packet.Available);
+                    }
+                    break;
+                case EFT.BufferZone.EBufferZoneData.PlayerInZoneStatusChange:
+                    {
+                        BufferZoneControllerClass.Instance.SetPlayerInZoneStatus(packet.ProfileId, packet.Available);
+                    }
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        private void OnFlareSuccessPacketReceived(FlareSuccessPacket packet)
+        {
+            if (Singleton<GameWorld>.Instance.MainPlayer.ProfileId == packet.ProfileId)
+            {
+                if (!packet.Success)
+                {
+                    NotificationManagerClass.DisplayNotification(new GClass2314("AirplaneDelayMessage".Localized(null),
+                                ENotificationDurationType.Default, ENotificationIconType.Default, null));
+                }
+            }
+        }
+
+        private void OnBTRInteractionPacketReceived(BTRInteractionPacket packet)
+        {
+            if (coopHandler.Players.TryGetValue(packet.NetId, out CoopPlayer playerToApply))
+            {
+                GameWorld gameWorld = Singleton<GameWorld>.Instance;
+                if (gameWorld.BtrController != null && gameWorld.BtrController.BtrView != null)
+                {
+                    if (packet.IsResponse && packet.Status != EBtrInteractionStatus.Confirmed)
+                    {
+                        if (packet.Status - EBtrInteractionStatus.Blacklisted <= 2 && playerToApply.IsYourPlayer)
+                        {
+                            GlobalEventHandlerClass.CreateEvent<BtrNotificationInteractionMessageEvent>().Invoke(playerToApply.PlayerId, packet.Status);
+                            return;
+                        }
+                    }
+                    gameWorld.BtrController.BtrView.Interaction(playerToApply, packet.Data);
+                }
+            }
+        }
+
+        private void OnSpawnSyncObjectPacketReceived(SpawnSyncObjectPacket packet)
+        {
+            packet.SubPacket.Execute();
+        }
+
+        private void OnReconnectPacketReceived(ReconnectPacket packet)
+        {
+            if (!packet.IsRequest)
+            {
+                CoopGame coopGame = CoopGame.Instance;
+                if (coopGame == null)
+                {
+                    return;
+                }
+
+                switch (packet.Type)
+                {
+                    case ReconnectPacket.EReconnectDataType.Throwable:
+                        if (packet.ThrowableData != null)
+                        {
 #if DEBUG
-								logger.LogWarning("Received reconnect packet for interactives: " + packet.InteractivesData.Count);
+                            logger.LogWarning("Received reconnect packet for throwables: " + packet.ThrowableData.Count);
 #endif
-								string localizedString = LocaleUtils.UI_SYNC_INTERACTABLES.Localized();
-								WorldInteractiveObject[] worldInteractiveObjects = Traverse.Create(Singleton<GameWorld>.Instance.World_0).Field<WorldInteractiveObject[]>("worldInteractiveObject_0").Value;
-								Dictionary<int, WorldInteractiveObject.GStruct415> netIdDictionary = [];
-								{
-									foreach (WorldInteractiveObject.GStruct415 data in packet.InteractivesData)
-									{
-										netIdDictionary.Add(data.NetId, data);
-									}
-								}
-
-								float total = packet.InteractivesData.Count;
-								float progress = 0f;
-								foreach (WorldInteractiveObject item in worldInteractiveObjects)
-								{
-									if (netIdDictionary.TryGetValue(item.NetId, out WorldInteractiveObject.GStruct415 value))
-									{
-										progress++;
-										coopGame.SetMatchmakerStatus(localizedString, progress / total);
-										item.SetInitialSyncState(value);
-									}
-								}
-							}
-							break;
-						}
-					case ReconnectPacket.EReconnectDataType.LampControllers:
-						{
-							if (packet.LampStates != null)
-							{
+                            string localizedString = LocaleUtils.UI_SYNC_THROWABLES.Localized();
+                            coopGame.SetMatchmakerStatus(localizedString);
+                            Singleton<GameWorld>.Instance.OnSmokeGrenadesDeserialized(packet.ThrowableData);
+                        }
+                        break;
+                    case ReconnectPacket.EReconnectDataType.Interactives:
+                        {
+                            if (packet.InteractivesData != null)
+                            {
 #if DEBUG
-								logger.LogWarning("Received reconnect packet for lampStates: " + packet.LampStates.Count);
+                                logger.LogWarning("Received reconnect packet for interactives: " + packet.InteractivesData.Count);
 #endif
-								string localizedString = LocaleUtils.UI_SYNC_LAMP_STATES.Localized();
-								Dictionary<int, LampController> lampControllerDictionary = LocationScene.GetAllObjects<LampController>(true)
-														.Where(FikaGlobals.LampControllerNetIdNot0)
-														.ToDictionary(FikaGlobals.LampControllerGetNetId);
+                                string localizedString = LocaleUtils.UI_SYNC_INTERACTABLES.Localized();
+                                WorldInteractiveObject[] worldInteractiveObjects = Traverse.Create(Singleton<GameWorld>.Instance.World_0).Field<WorldInteractiveObject[]>("worldInteractiveObject_0").Value;
+                                Dictionary<int, WorldInteractiveObject.WorldInteractiveDataPacketStruct> netIdDictionary = [];
+                                {
+                                    foreach (WorldInteractiveObject.WorldInteractiveDataPacketStruct data in packet.InteractivesData)
+                                    {
+                                        netIdDictionary.Add(data.NetId, data);
+                                    }
+                                }
 
-								float total = packet.LampStates.Count;
-								float progress = 0f;
-								foreach (KeyValuePair<int, byte> lampState in packet.LampStates)
-								{
-									progress++;
-									coopGame.SetMatchmakerStatus(localizedString, progress / total);
-									if (lampControllerDictionary.TryGetValue(lampState.Key, out LampController lampController))
-									{
-										if (lampController.LampState != (Turnable.EState)lampState.Value)
-										{
-											lampController.Switch((Turnable.EState)lampState.Value);
-										}
-									}
-								}
-							}
-							break;
-						}
-					case ReconnectPacket.EReconnectDataType.Windows:
-						{
+                                float total = packet.InteractivesData.Count;
+                                float progress = 0f;
+                                foreach (WorldInteractiveObject item in worldInteractiveObjects)
+                                {
+                                    if (netIdDictionary.TryGetValue(item.NetId, out WorldInteractiveObject.WorldInteractiveDataPacketStruct value))
+                                    {
+                                        progress++;
+                                        coopGame.SetMatchmakerStatus(localizedString, progress / total);
+                                        item.SetInitialSyncState(value);
+                                    }
+                                }
+                            }
+                            break;
+                        }
+                    case ReconnectPacket.EReconnectDataType.LampControllers:
+                        {
+                            if (packet.LampStates != null)
+                            {
 #if DEBUG
-							logger.LogWarning("Received reconnect packet for windowBreakers: " + packet.WindowBreakerStates.Count);
+                                logger.LogWarning("Received reconnect packet for lampStates: " + packet.LampStates.Count);
 #endif
-							if (packet.WindowBreakerStates != null)
-							{
-								Dictionary<int, Vector3> windowBreakerStates = packet.WindowBreakerStates;
-								string localizedString = LocaleUtils.UI_SYNC_WINDOWS.Localized();
+                                string localizedString = LocaleUtils.UI_SYNC_LAMP_STATES.Localized();
+                                Dictionary<int, LampController> lampControllerDictionary = LocationScene.GetAllObjects<LampController>(true)
+                                                        .Where(FikaGlobals.LampControllerNetIdNot0)
+                                                        .ToDictionary(FikaGlobals.LampControllerGetNetId);
 
-								float total = packet.WindowBreakerStates.Count;
-								float progress = 0f;
-								foreach (WindowBreaker windowBreaker in LocationScene.GetAllObjects<WindowBreaker>(true)
-									.Where(FikaGlobals.WindowBreakerAvailableToSync))
-								{
-									if (windowBreakerStates.TryGetValue(windowBreaker.NetId, out Vector3 hitPosition))
-									{
-										progress++;
-
-										coopGame.SetMatchmakerStatus(localizedString, progress / total);
-										try
-										{
-											DamageInfoStruct damageInfo = default;
-											damageInfo.HitPoint = hitPosition;
-											windowBreaker.MakeHit(in damageInfo, true);
-										}
-										catch (Exception ex)
-										{
-											logger.LogError("OnReconnectPacketReceived: Exception caught while setting up WindowBreakers: " + ex.Message);
-										}
-									}
-								}
-							}
-							break;
-						}
-					case ReconnectPacket.EReconnectDataType.OwnCharacter:
+                                float total = packet.LampStates.Count;
+                                float progress = 0f;
+                                foreach (KeyValuePair<int, byte> lampState in packet.LampStates)
+                                {
+                                    progress++;
+                                    coopGame.SetMatchmakerStatus(localizedString, progress / total);
+                                    if (lampControllerDictionary.TryGetValue(lampState.Key, out LampController lampController))
+                                    {
+                                        if (lampController.LampState != (Turnable.EState)lampState.Value)
+                                        {
+                                            lampController.Switch((Turnable.EState)lampState.Value);
+                                        }
+                                    }
+                                }
+                            }
+                            break;
+                        }
+                    case ReconnectPacket.EReconnectDataType.Windows:
+                        {
 #if DEBUG
-						logger.LogWarning("Received reconnect packet for own player");
+                            logger.LogWarning("Received reconnect packet for windowBreakers: " + packet.WindowBreakerStates.Count);
 #endif
-						coopGame.SetMatchmakerStatus(LocaleUtils.UI_RECEIVE_OWN_PLAYERS.Localized());
-						coopHandler.LocalGameInstance.Profile_0 = packet.Profile;
-						coopHandler.LocalGameInstance.Profile_0.Health = packet.ProfileHealthClass;
-						FikaBackendUtils.ReconnectPosition = packet.PlayerPosition;
-						NetworkTimeSync.Start(packet.TimeOffset);
-						break;
-					case ReconnectPacket.EReconnectDataType.Finished:
-						coopGame.SetMatchmakerStatus(LocaleUtils.UI_FINISH_RECONNECT.Localized());
-						ReconnectDone = true;
-						break;
-					default:
-						break;
-				}
-			}
-		}
+                            if (packet.WindowBreakerStates != null)
+                            {
+                                Dictionary<int, Vector3> windowBreakerStates = packet.WindowBreakerStates;
+                                string localizedString = LocaleUtils.UI_SYNC_WINDOWS.Localized();
 
-		private void OnWorldLootPacketReceived(WorldLootPacket packet)
-		{
-			if (Singleton<IFikaGame>.Instance != null && Singleton<IFikaGame>.Instance is CoopGame coopGame)
-			{
-				GClass1193 eftReader = new(packet.Data);
-				GClass1684 lootData = eftReader.ReadEFTLootDataDescriptor();
-				GClass1315 lootItems = GClass1685.DeserializeLootData(lootData);
-				if (lootItems.Count < 1)
-				{
-					throw new NullReferenceException("LootItems length was less than 1! Something probably went very wrong");
-				}
-				coopGame.LootItems = lootItems;
-				coopGame.HasReceivedLoot = true;
-			}
-		}
+                                float total = packet.WindowBreakerStates.Count;
+                                float progress = 0f;
+                                foreach (WindowBreaker windowBreaker in LocationScene.GetAllObjects<WindowBreaker>(true)
+                                    .Where(FikaGlobals.WindowBreakerAvailableToSync))
+                                {
+                                    if (windowBreakerStates.TryGetValue(windowBreaker.NetId, out Vector3 hitPosition))
+                                    {
+                                        progress++;
 
-		private void OnStatisticsPacketReceived(StatisticsPacket packet)
-		{
-			ServerFPS = packet.ServerFPS;
-		}
-
-		private void OnInteractableInitPacketReceived(InteractableInitPacket packet)
-		{
-			if (!packet.IsRequest)
-			{
-				World world = Singleton<GameWorld>.Instance.World_0;
-				if (world.Interactables == null)
-				{
-					world.method_0(packet.Interactables);
-					CoopGame coopGame = (CoopGame)Singleton<IFikaGame>.Instance;
-					if (coopGame != null)
-					{
-						coopGame.InteractablesInitialized = true;
-					}
-				}
-			}
-		}
-
-		private void OnSpawnPointPacketReceived(SpawnpointPacket packet)
-		{
-			CoopGame coopGame = (CoopGame)Singleton<IFikaGame>.Instance;
-			if (coopGame != null)
-			{
-				if (!packet.IsRequest && !string.IsNullOrEmpty(packet.Name))
-				{
-					coopGame.SpawnId = packet.Name;
-				}
-			}
-			else
-			{
-				logger.LogError("OnSpawnPointPacketReceived: CoopGame was null upon receiving packet!"); ;
-			}
-		}
-
-		private void OnQuestDropItemPacketReceived(QuestDropItemPacket packet)
-		{
-			if (MyPlayer.HealthController.IsAlive)
-			{
-				if (MyPlayer.AbstractQuestControllerClass is CoopClientSharedQuestController sharedQuestController)
-				{
-					sharedQuestController.ReceiveQuestDropItemPacket(ref packet);
-				}
-			}
-		}
-
-		private void OnQuestItemPacketReceived(QuestItemPacket packet)
-		{
-			if (MyPlayer.HealthController.IsAlive)
-			{
-				if (MyPlayer.AbstractQuestControllerClass is CoopClientSharedQuestController sharedQuestController)
-				{
-					sharedQuestController.ReceiveQuestItemPacket(ref packet);
-				}
-			}
-		}
-
-		private void OnQuestConditionPacketReceived(QuestConditionPacket packet)
-		{
-			if (MyPlayer.HealthController.IsAlive)
-			{
-				if (MyPlayer.AbstractQuestControllerClass is CoopClientSharedQuestController sharedQuestController)
-				{
-					sharedQuestController.ReceiveQuestPacket(ref packet);
-				}
-			}
-		}
-
-		private void OnTextMessagePacketReceived(TextMessagePacket packet)
-		{
-			logger.LogInfo($"Received message from: {packet.Nickname}, Message: {packet.Message}");
-
-			if (fikaChat != null)
-			{
-				fikaChat.ReceiveMessage(packet.Nickname, packet.Message);
-			}
-		}
-
-		public void SetupGameVariables(CoopPlayer coopPlayer)
-		{
-			MyPlayer = coopPlayer;
-			if (FikaPlugin.EnableChat.Value)
-			{
-				fikaChat = gameObject.AddComponent<FikaChat>();
-			}
-		}
-
-		private void OnOperationCallbackPacketReceived(OperationCallbackPacket packet)
-		{
-			if (coopHandler.Players.TryGetValue(packet.NetId, out CoopPlayer player) && player.IsYourPlayer)
-			{
-				player.HandleCallbackFromServer(packet);
-			}
-		}
-
-		private void OnSyncNetIdPacketReceived(SyncNetIdPacket packet)
-		{
-			Dictionary<int, CoopPlayer> newPlayers = coopHandler.Players;
-			if (coopHandler.Players.TryGetValue(packet.NetId, out CoopPlayer player))
-			{
-				if (player.ProfileId != packet.ProfileId)
-				{
-					FikaPlugin.Instance.FikaLogger.LogWarning($"OnSyncNetIdPacketReceived: {packet.ProfileId} had the wrong NetId: {coopHandler.Players[packet.NetId].NetId}, should be {packet.NetId}");
-					for (int i = 0; i < coopHandler.Players.Count; i++)
-					{
-						KeyValuePair<int, CoopPlayer> playerToReorganize = coopHandler.Players.Where(x => x.Value.ProfileId == packet.ProfileId).First();
-						coopHandler.Players.Remove(playerToReorganize.Key);
-						coopHandler.Players[packet.NetId] = playerToReorganize.Value;
-					}
-				}
-			}
-			else
-			{
-				FikaPlugin.Instance.FikaLogger.LogError($"OnSyncNetIdPacketReceived: Could not find NetId {packet.NetId} in player list!");
-				string allPlayers = "";
-				foreach (KeyValuePair<int, CoopPlayer> kvp in coopHandler.Players)
-				{
-					string toAdd = $"Key: {kvp.Key}, Nickname: {kvp.Value.Profile.Nickname}, NetId: {kvp.Value.NetId}";
-					allPlayers = string.Join(", ", allPlayers + toAdd);
-				}
-				FikaPlugin.Instance.FikaLogger.LogError(allPlayers);
-			}
-		}
-
-		private void OnAssignNetIdPacketReceived(AssignNetIdPacket packet)
-		{
-			FikaPlugin.Instance.FikaLogger.LogInfo($"OnAssignNetIdPacketReceived: Assigned NetId {packet.NetId} to my own client.");
-			MyPlayer.NetId = packet.NetId;
-			MyPlayer.PlayerId = packet.NetId;
-			int i = -1;
-			foreach (KeyValuePair<int, CoopPlayer> player in coopHandler.Players)
-			{
-				if (player.Value == MyPlayer)
-				{
-					i = player.Key;
-
-					break;
-				}
-			}
-
-			if (i == -1)
-			{
-				FikaPlugin.Instance.FikaLogger.LogError("OnAssignNetIdPacketReceived: Could not find own player among players list");
-				return;
-			}
-
-			coopHandler.Players.Remove(i);
-			coopHandler.Players[packet.NetId] = MyPlayer;
-		}
-
-		private void OnSendCharacterPacketReceived(SendCharacterPacket packet)
-		{
-			if (coopHandler == null)
-			{
-				return;
-			}
-
-			if (packet.PlayerInfoPacket.Profile.ProfileId != myProfileId)
-			{
-				coopHandler.QueueProfile(packet.PlayerInfoPacket.Profile, packet.PlayerInfoPacket.HealthByteArray, packet.Position, packet.NetId, packet.IsAlive, packet.IsAI,
-							 packet.PlayerInfoPacket.ControllerId.Value, packet.PlayerInfoPacket.FirstOperationId, packet.PlayerInfoPacket.IsZombie,
-							 packet.PlayerInfoPacket.ControllerType, packet.PlayerInfoPacket.ItemId);
-			}
-		}
-
-		private void OnBorderZonePacketReceived(BorderZonePacket packet)
-		{
-			if (Singleton<GameWorld>.Instantiated)
-			{
-				BorderZone[] borderZones = Singleton<GameWorld>.Instance.BorderZones;
-				if (borderZones != null && borderZones.Length > 0)
-				{
-					foreach (BorderZone borderZone in borderZones)
-					{
-						if (borderZone.Id == packet.ZoneId)
-						{
-							List<IPlayer> players = Singleton<GameWorld>.Instance.RegisteredPlayers;
-							foreach (IPlayer player in players)
-							{
-								if (player.ProfileId == packet.ProfileId)
-								{
-									IPlayerOwner playerBridge = Singleton<GameWorld>.Instance.GetAlivePlayerBridgeByProfileID(player.ProfileId);
-									borderZone.ProcessIncomingPacket(playerBridge, true);
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-
-		private void OnMinePacketReceived(MinePacket packet)
-		{
-			NetworkGame<EftGamePlayerOwner>.Class1513 mineSeeker = new()
-			{
-				minePosition = packet.MinePositon
-			};
-			MineDirectional mineDirectional = MineDirectional.Mines.FirstOrDefault(mineSeeker.method_0);
-			if (mineDirectional == null)
-			{
-				logger.LogError($"OnMinePacketReceived: Could not find mine at position {packet.MinePositon}");
-				return;
-			}
-			mineDirectional.Explosion();
-		}
-
-		private void OnWeatherPacketReceived(WeatherPacket packet)
-		{
-			if (!packet.IsRequest)
-			{
-				if (CoopHandler.LocalGameInstance != null)
-				{
-					CoopHandler.LocalGameInstance.WeatherClasses = packet.WeatherClasses;
-					CoopHandler.LocalGameInstance.Season = packet.Season;
-					CoopHandler.LocalGameInstance.SeasonsSettings = new()
-					{
-						SpringSnowFactor = packet.SpringSnowFactor
-					};
-					return;
-				}
-
-				logger.LogError("OnWeatherPacketReceived: LocalGameInstance was null!");
-			}
-		}
-
-		private void OnExfiltrationPacketReceived(ExfiltrationPacket packet)
-		{
-			if (ExfiltrationControllerClass.Instance != null)
-			{
-				ExfiltrationControllerClass exfilController = ExfiltrationControllerClass.Instance;
-
-				if (exfilController.ExfiltrationPoints == null)
-				{
-					return;
-				}
-
-				CoopGame coopGame = (CoopGame)Singleton<IFikaGame>.Instance;
-				if (coopGame == null)
-				{
+                                        coopGame.SetMatchmakerStatus(localizedString, progress / total);
+                                        try
+                                        {
+                                            DamageInfoStruct damageInfo = default;
+                                            damageInfo.HitPoint = hitPosition;
+                                            windowBreaker.MakeHit(in damageInfo, true);
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            logger.LogError("OnReconnectPacketReceived: Exception caught while setting up WindowBreakers: " + ex.Message);
+                                        }
+                                    }
+                                }
+                            }
+                            break;
+                        }
+                    case ReconnectPacket.EReconnectDataType.OwnCharacter:
 #if DEBUG
-					logger.LogError("OnExfiltrationPacketReceived: coopGame was null!");
+                        logger.LogWarning("Received reconnect packet for own player");
 #endif
-					return;
-				}
+                        coopGame.SetMatchmakerStatus(LocaleUtils.UI_RECEIVE_OWN_PLAYERS.Localized());
+                        coopHandler.LocalGameInstance.Profile_0 = packet.Profile;
+                        coopHandler.LocalGameInstance.Profile_0.Health = packet.ProfileHealthClass;
+                        FikaBackendUtils.ReconnectPosition = packet.PlayerPosition;
+                        break;
+                    case ReconnectPacket.EReconnectDataType.Finished:
+                        coopGame.SetMatchmakerStatus(LocaleUtils.UI_FINISH_RECONNECT.Localized());
+                        ReconnectDone = true;
+                        break;
+                    default:
+                        break;
+                }
+            }
+        }
 
-				CarExtraction carExtraction = FindObjectOfType<CarExtraction>();
+        private void OnWorldLootPacketReceived(WorldLootPacket packet)
+        {
+            CoopGame coopGame = CoopGame.Instance;
+            if (coopGame != null)
+            {
+                using GClass1212 eftReader = GClass1215.Get(packet.Data);
+                GClass1718 lootData = eftReader.ReadEFTLootDataDescriptor();
+                GClass1333 lootItems = EFTItemSerializerClass.DeserializeLootData(lootData);
+                if (lootItems.Count < 1)
+                {
+                    throw new NullReferenceException("LootItems length was less than 1! Something probably went very wrong");
+                }
+                coopGame.LootItems = lootItems;
+                coopGame.HasReceivedLoot = true;
+            }
+        }
 
-				int index = 0;
-				foreach (KeyValuePair<string, EExfiltrationStatus> exfilPoint in packet.ExfiltrationPoints)
-				{
-					ExfiltrationPoint point = exfilController.ExfiltrationPoints.Where(x => x.Settings.Name == exfilPoint.Key).FirstOrDefault();
-					if (point != null || point != default)
-					{
-						point.Settings.StartTime = packet.StartTimes[index];
-						index++;
-						if (point.Status != exfilPoint.Value && (exfilPoint.Value == EExfiltrationStatus.RegularMode || exfilPoint.Value == EExfiltrationStatus.UncompleteRequirements))
-						{
-							point.Enable();
-							point.Status = exfilPoint.Value;
-						}
-						else if (point.Status != exfilPoint.Value && exfilPoint.Value == EExfiltrationStatus.NotPresent || exfilPoint.Value == EExfiltrationStatus.Pending)
-						{
-							point.Disable();
-							point.Status = exfilPoint.Value;
+        private void OnStatisticsPacketReceived(StatisticsPacket packet)
+        {
+            ServerFPS = packet.ServerFPS;
+        }
 
-							if (carExtraction != null)
-							{
-								if (carExtraction.Subscribee == point)
-								{
-									carExtraction.Play(true);
-								}
-							}
-						}
-					}
-					else
-					{
-						logger.LogWarning($"ExfiltrationPacketPacketReceived::ExfiltrationPoints: Could not find exfil point with name '{exfilPoint.Key}'");
-					}
-				}
+        private void OnInteractableInitPacketReceived(InteractableInitPacket packet)
+        {
+            if (!packet.IsRequest)
+            {
+                World world = Singleton<GameWorld>.Instance.World_0;
+                if (world.Interactables == null)
+                {
+                    world.method_0(packet.Interactables);
+                    CoopGame coopGame = CoopGame.Instance;
+                    if (coopGame != null)
+                    {
+                        coopGame.InteractablesInitialized = true;
+                    }
+                }
+            }
+        }
 
-				if (coopGame.RaidSettings.IsScav && exfilController.ScavExfiltrationPoints != null && packet.HasScavExfils)
-				{
-					string scavProfile = FikaGlobals.GetProfile(true).ProfileId;
-					int scavIndex = 0;
-					foreach (KeyValuePair<string, EExfiltrationStatus> scavExfilPoint in packet.ScavExfiltrationPoints)
-					{
-						ScavExfiltrationPoint scavPoint = exfilController.ScavExfiltrationPoints.Where(x => x.Settings.Name == scavExfilPoint.Key).FirstOrDefault();
-						if (scavPoint != null || scavPoint != default)
-						{
-							scavPoint.Settings.StartTime = packet.ScavStartTimes[scavIndex];
-							scavIndex++;
-							if (scavPoint.Status != scavExfilPoint.Value && scavExfilPoint.Value == EExfiltrationStatus.RegularMode)
-							{
-								scavPoint.Enable();
-								if (!string.IsNullOrEmpty(scavProfile))
-								{
-									scavPoint.EligibleIds.Add(scavProfile);
-								}
-								scavPoint.Status = scavExfilPoint.Value;
-								coopGame.UpdateExfilPointFromServer(scavPoint, true);
-							}
-							else if (scavPoint.Status != scavExfilPoint.Value && (scavExfilPoint.Value == EExfiltrationStatus.NotPresent || scavExfilPoint.Value == EExfiltrationStatus.Pending))
-							{
-								scavPoint.Disable();
-								if (!string.IsNullOrEmpty(scavProfile))
-								{
-									scavPoint.EligibleIds.Remove(scavProfile);
-								}
-								scavPoint.Status = scavExfilPoint.Value;
-								coopGame.UpdateExfilPointFromServer(scavPoint, false);
-							}
-						}
-						else
-						{
-							logger.LogWarning($"ExfiltrationPacketPacketReceived::ScavExfiltrationPoints: Could not find exfil point with name '{scavExfilPoint.Key}'");
-						}
-					}
-				}
+        private void OnQuestDropItemPacketReceived(QuestDropItemPacket packet)
+        {
+            if (MyPlayer.HealthController.IsAlive)
+            {
+                if (MyPlayer.AbstractQuestControllerClass is CoopClientSharedQuestController sharedQuestController)
+                {
+                    sharedQuestController.ReceiveQuestDropItemPacket(ref packet);
+                }
+            }
+        }
 
-				ExfilPointsReceived = true;
-			}
-			else
-			{
-				logger.LogWarning($"ExfiltrationPacketPacketReceived: ExfiltrationController was null");
-			}
-		}
+        private void OnQuestItemPacketReceived(QuestItemPacket packet)
+        {
+            if (MyPlayer.HealthController.IsAlive)
+            {
+                if (MyPlayer.AbstractQuestControllerClass is CoopClientSharedQuestController sharedQuestController)
+                {
+                    sharedQuestController.ReceiveQuestItemPacket(ref packet);
+                }
+            }
+        }
 
-		private void OnGenericPacketReceived(GenericPacket packet)
-		{
-			packet.SubPacket.Execute(null);
-		}
+        private void OnQuestConditionPacketReceived(QuestConditionPacket packet)
+        {
+            if (MyPlayer.HealthController.IsAlive)
+            {
+                if (MyPlayer.AbstractQuestControllerClass is CoopClientSharedQuestController sharedQuestController)
+                {
+                    sharedQuestController.ReceiveQuestPacket(ref packet);
+                }
+            }
+        }
 
-		private void OnHealthSyncPacketReceived(HealthSyncPacket packet)
-		{
-			if (coopHandler.Players.TryGetValue(packet.NetId, out CoopPlayer playerToApply))
-			{
-				playerToApply.PacketReceiver.HealthSyncPackets.Enqueue(packet);
-			}
-		}
+        private void OnTextMessagePacketReceived(TextMessagePacket packet)
+        {
+            logger.LogInfo($"Received message from: {packet.Nickname}, Message: {packet.Message}");
 
-		private void OnInformationPacketReceived(InformationPacket packet)
-		{
-			if (coopHandler != null)
-			{
-				CoopGame coopGame = coopHandler.LocalGameInstance;
-				if (coopGame != null)
-				{
-					coopGame.RaidStarted = packet.RaidStarted;
-					if (packet.HostReady)
-					{
-						coopGame.SetClientTime(packet.GameTime, packet.SessionTime);
-					}
-				}
-			}
-			ReadyClients = packet.ReadyPlayers;
-			HostReady = packet.HostReady;
-			HostLoaded = packet.HostLoaded;
-			if (packet.AmountOfPeers > 0)
-			{
-				FikaBackendUtils.HostExpectedNumberOfPlayers = packet.AmountOfPeers;
-			}
-		}
+            if (fikaChat != null)
+            {
+                fikaChat.ReceiveMessage(packet.Nickname, packet.Message);
+            }
+        }
 
-		private void OnAllCharacterRequestPacketReceived(AllCharacterRequestPacket packet)
-		{
-			if (coopHandler == null)
-			{
-				return;
-			}
+        public void SetupGameVariables(CoopPlayer coopPlayer)
+        {
+            MyPlayer = coopPlayer;
+            if (FikaPlugin.EnableChat.Value)
+            {
+                fikaChat = gameObject.AddComponent<FikaChat>();
+            }
+        }
 
-			if (!packet.IsRequest)
-			{
-#if DEBUG
-				logger.LogInfo($"Received CharacterRequest! ProfileID: {packet.PlayerInfoPacket.Profile.ProfileId}, Nickname: {packet.PlayerInfoPacket.Profile.Nickname}");
-#endif
-				if (packet.ProfileId != MyPlayer.ProfileId)
-				{
-					coopHandler.QueueProfile(packet.PlayerInfoPacket.Profile, packet.PlayerInfoPacket.HealthByteArray, packet.Position, packet.NetId, packet.IsAlive, packet.IsAI,
-						packet.PlayerInfoPacket.ControllerId.Value, packet.PlayerInfoPacket.FirstOperationId, packet.PlayerInfoPacket.IsZombie,
-						packet.PlayerInfoPacket.ControllerType, packet.PlayerInfoPacket.ItemId);
-				}
-			}
-			else if (packet.IsRequest)
-			{
-#if DEBUG
-				logger.LogInfo($"Received CharacterRequest from server, send my Profile.");
-#endif
-				AllCharacterRequestPacket requestPacket = new(MyPlayer.ProfileId)
-				{
-					IsRequest = false,
-					PlayerInfoPacket = new()
-					{
-						Profile = MyPlayer.Profile,
-						ControllerId = MyPlayer.InventoryController.CurrentId,
-						FirstOperationId = MyPlayer.InventoryController.NextOperationId
-					},
-					IsAlive = MyPlayer.ActiveHealthController.IsAlive,
-					IsAI = MyPlayer.IsAI,
-					Position = MyPlayer.Transform.position,
-					NetId = MyPlayer.NetId
-				};
+        private void OnOperationCallbackPacketReceived(OperationCallbackPacket packet)
+        {
+            if (coopHandler.Players.TryGetValue(packet.NetId, out CoopPlayer player) && player.IsYourPlayer)
+            {
+                player.HandleCallbackFromServer(packet);
+            }
+        }
 
-				if (MyPlayer.ActiveHealthController != null)
-				{
-					requestPacket.PlayerInfoPacket.HealthByteArray = MyPlayer.ActiveHealthController.SerializeState();
-				}
+        private void OnSendCharacterPacketReceived(SendCharacterPacket packet)
+        {
+            if (coopHandler == null)
+            {
+                return;
+            }
 
-				if (MyPlayer.HandsController != null)
-				{
-					requestPacket.PlayerInfoPacket.ControllerType = GClass1808.FromController(MyPlayer.HandsController);
-					requestPacket.PlayerInfoPacket.ItemId = MyPlayer.HandsController.Item.Id;
-					requestPacket.PlayerInfoPacket.IsStationary = MyPlayer.MovementContext.IsStationaryWeaponInHands;
-				}
+            if (packet.PlayerInfoPacket.Profile.ProfileId != myProfileId)
+            {
+                coopHandler.QueueProfile(packet.PlayerInfoPacket.Profile, packet.PlayerInfoPacket.HealthByteArray, packet.Position, packet.NetId, packet.IsAlive, packet.IsAI,
+                             packet.PlayerInfoPacket.ControllerId.Value, packet.PlayerInfoPacket.FirstOperationId, packet.PlayerInfoPacket.IsZombie,
+                             packet.PlayerInfoPacket.ControllerType, packet.PlayerInfoPacket.ItemId);
+            }
+        }
 
-				SendData(ref requestPacket, DeliveryMethod.ReliableOrdered);
-			}
-		}
+        private void OnGenericPacketReceived(GenericPacket packet)
+        {
+            packet.SubPacket.Execute();
+        }
 
-		private void OnCommonPlayerPacketReceived(CommonPlayerPacket packet)
-		{
-			if (coopHandler.Players.TryGetValue(packet.NetId, out CoopPlayer playerToApply))
-			{
-				playerToApply.PacketReceiver.CommonPlayerPackets.Enqueue(packet);
-			}
-		}
+        private void OnHealthSyncPacketReceived(HealthSyncPacket packet)
+        {
+            if (coopHandler.Players.TryGetValue(packet.NetId, out CoopPlayer playerToApply))
+            {
+                if (playerToApply is ObservedCoopPlayer observedPlayer)
+                {
+                    if (packet.Packet.SyncType == NetworkHealthSyncPacketStruct.ESyncType.IsAlive && !packet.Packet.Data.IsAlive.IsAlive)
+                    {
+                        observedPlayer.SetAggressorData(packet.KillerId, packet.BodyPart, packet.WeaponId);
+                        observedPlayer.CorpseSyncPacket = packet.CorpseSyncPacket;
+                        if (packet.TriggerZones.Length > 0)
+                        {
+                            observedPlayer.TriggerZones.Clear();
+                            foreach (string triggerZone in packet.TriggerZones)
+                            {
+                                observedPlayer.TriggerZones.Add(triggerZone);
+                            }
+                        }
+                    }
+                    observedPlayer.NetworkHealthController.HandleSyncPacket(packet.Packet);
+                    return;
+                }
+                logger.LogError($"OnHealthSyncPacketReceived::Player with id {playerToApply.NetId} was not observed. Name: {playerToApply.Profile.Nickname}");
+            }
+        }
 
-		private void OnInventoryPacketReceived(InventoryPacket packet)
-		{
-			if (coopHandler.Players.TryGetValue(packet.NetId, out CoopPlayer playerToApply))
-			{
-				playerToApply.PacketReceiver.InventoryPackets.Enqueue(packet);
-			}
-		}
+        private void OnInformationPacketReceived(InformationPacket packet)
+        {
+            if (coopHandler != null)
+            {
+                CoopGame coopGame = coopHandler.LocalGameInstance;
+                if (coopGame != null)
+                {
+                    coopGame.RaidStarted = packet.RaidStarted;
+                    if (packet.HostReady)
+                    {
+                        coopGame.SetClientTime(packet.GameTime, packet.SessionTime);
+                    }
+                }
+            }
+            ReadyClients = packet.ReadyPlayers;
+            HostReady = packet.HostReady;
+            HostLoaded = packet.HostLoaded;
+            if (packet.AmountOfPeers > 0)
+            {
+                FikaBackendUtils.HostExpectedNumberOfPlayers = packet.AmountOfPeers;
+            }
+        }
 
-		private void OnDamagePacketReceived(DamagePacket packet)
-		{
-			if (coopHandler.Players.TryGetValue(packet.NetId, out CoopPlayer playerToApply) && playerToApply.IsYourPlayer)
-			{
-				playerToApply.PacketReceiver.DamagePackets.Enqueue(packet);
-			}
-		}
+        private void OnCommonPlayerPacketReceived(CommonPlayerPacket packet)
+        {
+            if (coopHandler.Players.TryGetValue(packet.NetId, out CoopPlayer playerToApply))
+            {
+                packet.SubPacket.Execute(playerToApply);
+            }
+        }
 
-		private void OnArmorDamagePacketReceived(ArmorDamagePacket packet)
-		{
-			if (coopHandler.Players.TryGetValue(packet.NetId, out CoopPlayer playerToApply))
-			{
-				playerToApply.PacketReceiver.ArmorDamagePackets.Enqueue(packet);
-			}
-		}
+        private void OnInventoryPacketReceived(InventoryPacket packet)
+        {
+            if (coopHandler.Players.TryGetValue(packet.NetId, out CoopPlayer playerToApply))
+            {
+                HandleInventoryPacket(ref packet, playerToApply);
+            }
+        }
 
-		private void OnWeaponPacketReceived(WeaponPacket packet)
-		{
-			if (coopHandler.Players.TryGetValue(packet.NetId, out CoopPlayer playerToApply))
-			{
-				playerToApply.PacketReceiver.FirearmPackets.Enqueue(packet);
-			}
-		}
+        private void OnDamagePacketReceived(DamagePacket packet)
+        {
+            if (coopHandler.Players.TryGetValue(packet.NetId, out CoopPlayer playerToApply) && playerToApply.IsYourPlayer)
+            {
+                playerToApply.HandleDamagePacket(packet);
+            }
+        }
 
-		private void OnHalloweenEventPacketReceived(HalloweenEventPacket packet)
-		{
-			HalloweenEventControllerClass controller = HalloweenEventControllerClass.Instance;
+        private void OnArmorDamagePacketReceived(ArmorDamagePacket packet)
+        {
+            if (coopHandler.Players.TryGetValue(packet.NetId, out CoopPlayer playerToApply))
+            {
+                playerToApply.HandleArmorDamagePacket(packet);
+            }
+        }
 
-			if (controller == null)
-			{
-				logger.LogError("OnHalloweenEventPacketReceived: controller was null!");
-				return;
-			}
+        private void OnWeaponPacketReceived(WeaponPacket packet)
+        {
+            if (coopHandler.Players.TryGetValue(packet.NetId, out CoopPlayer playerToApply))
+            {
+                packet.SubPacket.Execute(playerToApply);
+            }
+        }
 
-			if (packet.SyncEvent == null)
-			{
-				logger.LogError("OnHalloweenEventPacketReceived: event was null!");
-				return;
-			}
+        private void OnHalloweenEventPacketReceived(HalloweenEventPacket packet)
+        {
+            HalloweenEventControllerClass controller = HalloweenEventControllerClass.Instance;
 
-			packet.SyncEvent.Invoke();
-		}
+            if (controller == null)
+            {
+                logger.LogError("OnHalloweenEventPacketReceived: controller was null!");
+                return;
+            }
 
-		private void OnBTRPacketReceived(BTRPacket packet)
-		{
-			GameWorld gameWorld = Singleton<GameWorld>.Instance;
-			if (gameWorld != null)
-			{
-				BTRControllerClass btrController = gameWorld.BtrController;
-				if (btrController != null)
-				{
-					btrController.SyncBTRVehicleFromServer(packet.Data);
-				}
-			}
-		}
+            if (packet.SyncEvent == null)
+            {
+                logger.LogError("OnHalloweenEventPacketReceived: event was null!");
+                return;
+            }
 
-		private void OnPlayerStatePacketReceived(PlayerStatePacket packet)
-		{
-			if (coopHandler.Players.TryGetValue(packet.NetId, out CoopPlayer playerToApply))
-			{
-				playerToApply.Snapshotter.Insert(packet);
-			}
-		}
+            packet.SyncEvent.Invoke();
+        }
 
-		protected void Update()
-		{
-			netClient?.PollEvents();
-		}
+        private void OnBTRPacketReceived(BTRPacket packet)
+        {
+            GameWorld gameWorld = Singleton<GameWorld>.Instance;
+            if (gameWorld != null)
+            {
+                gameWorld.BtrController?.SyncBTRVehicleFromServer(packet.Data);
+            }
+        }
 
-		protected void OnDestroy()
-		{
-			netClient?.Stop();
+        private void OnPlayerStatePacketReceived(PlayerStatePacket packet)
+        {
+            Snapshots.Add(packet);
+        }
 
-			if (fikaChat != null)
-			{
-				Destroy(fikaChat);
-			}
+        protected void Update()
+        {
+            netClient?.PollEvents();
+            stateHandle = new UpdateInterpolators(Time.unscaledDeltaTime).Schedule(ObservedCoopPlayers.Count, 16,
+                new HandlePlayerStates().Schedule(Snapshots.Count, 16));
 
-			FikaEventDispatcher.DispatchEvent(new FikaNetworkManagerDestroyedEvent(this));
-		}
+            int inventoryOps = inventoryOperations.Count;
+            if (inventoryOps > 0)
+            {
+                if (inventoryOperations.Peek().WaitingForForeignEvents())
+                {
+                    return;
+                }
+                inventoryOperations.Dequeue().method_1(HandleResult);
+            }
+        }
 
-		public void SendData<T>(ref T packet, DeliveryMethod deliveryMethod) where T : INetSerializable
-		{
-			dataWriter.Reset();
-			packetProcessor.WriteNetSerializable(dataWriter, ref packet);
-			netClient.FirstPeer.Send(dataWriter, deliveryMethod);
-		}
+        protected void LateUpdate()
+        {
+            stateHandle.Complete();
+            for (int i = 0; i < ObservedCoopPlayers.Count; i++)
+            {
+                ObservedCoopPlayers[i].ManualStateUpdate();
+            }
+            Snapshots.Clear();
+        }
 
-		public void OnPeerConnected(NetPeer peer)
-		{
-			NotificationManagerClass.DisplayMessageNotification(string.Format(LocaleUtils.CONNECTED_TO_SERVER.Localized(), peer.Port),
-				ENotificationDurationType.Default, ENotificationIconType.Friend);
+        protected void OnDestroy()
+        {
+            netClient?.Stop();
 
-			Profile ownProfile = FikaGlobals.GetProfile(FikaBackendUtils.IsScav);
-			if (ownProfile == null)
-			{
-				logger.LogError("OnPeerConnected: Own profile was null!");
-				return;
-			}
+            if (fikaChat != null)
+            {
+                Destroy(fikaChat);
+            }
 
-			Dictionary<Profile, bool> profiles = [];
-			profiles.Add(ownProfile, false);
-			LoadingProfilePacket profilePacket = new()
-			{
-				Profiles = profiles
-			};
-			SendData(ref profilePacket, DeliveryMethod.ReliableOrdered);
+            FikaEventDispatcher.DispatchEvent(new FikaNetworkManagerDestroyedEvent(this));
+        }
 
-			FikaEventDispatcher.DispatchEvent(new PeerConnectedEvent(peer, this));
-		}
+        public void SendData<T>(ref T packet, DeliveryMethod deliveryMethod) where T : INetSerializable
+        {
+            dataWriter.Reset();
 
-		public void OnNetworkError(IPEndPoint endPoint, SocketError socketErrorCode)
-		{
-			logger.LogInfo("[CLIENT] We received error " + socketErrorCode);
-		}
+            packetProcessor.WriteNetSerializable(dataWriter, ref packet);
+            netClient.FirstPeer.Send(dataWriter, deliveryMethod);
+        }
 
-		public void OnNetworkReceive(NetPeer peer, NetPacketReader reader, byte channelNumber, DeliveryMethod deliveryMethod)
-		{
-			packetProcessor.ReadAllPackets(reader, peer);
-		}
+        public void SendVOIPPacket(ref VOIPPacket packet, NetPeer peer = null)
+        {
+            if (packet.Data == null)
+            {
+                logger.LogError("SendVOIPPacket: data was null");
+                return;
+            }
 
-		public void OnNetworkReceiveUnconnected(IPEndPoint remoteEndPoint, NetPacketReader reader, UnconnectedMessageType messageType)
-		{
-			if (messageType == UnconnectedMessageType.BasicMessage && netClient.ConnectedPeersCount == 0 && reader.GetInt() == 1)
-			{
-				logger.LogInfo("[CLIENT] Received discovery response. Connecting to: " + remoteEndPoint);
-				netClient.Connect(remoteEndPoint, "fika.core");
-			}
-		}
+            SendData(ref packet, DeliveryMethod.ReliableOrdered);
+        }
 
-		public void OnNetworkLatencyUpdate(NetPeer peer, int latency)
-		{
-			Ping = latency;
-			NetworkGameSession.Rtt = peer.RoundTripTime;
-			NetworkGameSession.LossPercent = (int)NetClient.Statistics.PacketLossPercent;
-		}
+        public void SendVOIPData(ArraySegment<byte> data, NetPeer peer = null)
+        {
+            dataWriter.Reset();
+            dataWriter.PutBytesWithLength(data.Array, data.Offset, (ushort)data.Count);
+            netClient.FirstPeer.Send(dataWriter, 1, DeliveryMethod.Sequenced);
+        }
 
-		public void OnConnectionRequest(ConnectionRequest request)
-		{
+        public void SendReusable<T>(T packet, DeliveryMethod deliveryMethod) where T : class, IReusable, new()
+        {
+            dataWriter.Reset();
 
-		}
+            packetProcessor.Write(dataWriter, packet);
+            netClient.FirstPeer.Send(dataWriter, deliveryMethod);
 
-		public void OnPeerDisconnected(NetPeer peer, DisconnectInfo disconnectInfo)
-		{
-			logger.LogInfo("[CLIENT] We disconnected because " + disconnectInfo.Reason);
-			if (disconnectInfo.Reason is DisconnectReason.Timeout)
-			{
-				NotificationManagerClass.DisplayWarningNotification(LocaleUtils.LOST_CONNECTION.Localized());
-				Destroy(MyPlayer.PacketReceiver);
-				MyPlayer.PacketSender.DestroyThis();
-				Destroy(this);
-				Singleton<FikaClient>.Release(this);
-			}
+            packet.Flush();
+        }
 
-			if (disconnectInfo.Reason is DisconnectReason.ConnectionRejected)
-			{
-				string reason = disconnectInfo.AdditionalData.GetString();
-				if (!string.IsNullOrEmpty(reason))
-				{
-					NotificationManagerClass.DisplayWarningNotification(reason);
-					return;
-				}
+        public void OnPeerConnected(NetPeer peer)
+        {
+            NotificationManagerClass.DisplayMessageNotification(string.Format(LocaleUtils.CONNECTED_TO_SERVER.Localized(), peer.Port),
+                ENotificationDurationType.Default, ENotificationIconType.Friend);
 
-				logger.LogError("OnPeerDisconnected: Rejected connection but no reason");
-			}
-		}
+            Profile ownProfile = FikaGlobals.GetProfile(FikaBackendUtils.IsScav);
+            if (ownProfile == null)
+            {
+                logger.LogError("OnPeerConnected: Own profile was null!");
+                return;
+            }
 
-		public void RegisterPacket<T>(Action<T> handle) where T : INetSerializable, new()
-		{
-			packetProcessor.SubscribeNetSerializable(handle);
-		}
+            NetworkSettingsPacket settingsPacket = new()
+            {
+                ProfileId = ownProfile.ProfileId
+            };
+            SendData(ref settingsPacket, DeliveryMethod.ReliableOrdered);
 
-		public void RegisterPacket<T, TUserData>(Action<T, TUserData> handle) where T : INetSerializable, new()
-		{
-			packetProcessor.SubscribeNetSerializable(handle);
-		}
+            ownProfile.Info.SetProfileNickname(FikaBackendUtils.PMCName ?? ownProfile.Nickname);
+            Dictionary<Profile, bool> profiles = [];
+            profiles.Add(ownProfile, false);
+            LoadingProfilePacket profilePacket = new()
+            {
+                Profiles = profiles
+            };
+            SendData(ref profilePacket, DeliveryMethod.ReliableOrdered);
 
-		public void PrintStatistics()
-		{
-			logger.LogInfo("..:: Fika Client Session Statistics ::..");
-			logger.LogInfo($"Sent packets: {netClient.Statistics.PacketsSent}");
-			logger.LogInfo($"Sent data: {FikaGlobals.FormatFileSize(netClient.Statistics.BytesSent)}");
-			logger.LogInfo($"Received packets: {netClient.Statistics.PacketsReceived}");
-			logger.LogInfo($"Received data: {FikaGlobals.FormatFileSize(netClient.Statistics.BytesReceived)}");
-			logger.LogInfo($"Packet loss: {netClient.Statistics.PacketLossPercent}%");
-		}
-	}
+            FikaEventDispatcher.DispatchEvent(new PeerConnectedEvent(peer, this));
+        }
+
+        public void OnNetworkError(IPEndPoint endPoint, SocketError socketErrorCode)
+        {
+            logger.LogInfo("[CLIENT] We received error " + socketErrorCode);
+        }
+
+        public void OnNetworkReceive(NetPeer peer, NetPacketReader reader, byte channelNumber, DeliveryMethod deliveryMethod)
+        {
+            if (channelNumber == 1)
+            {
+                VOIPClient.NetworkReceivedPacket(new(reader.GetBytesWithLength()));
+            }
+            else
+            {
+                packetProcessor.ReadAllPackets(reader, peer);
+            }
+        }
+
+        public void OnNetworkReceiveUnconnected(IPEndPoint remoteEndPoint, NetPacketReader reader, UnconnectedMessageType messageType)
+        {
+            if (messageType == UnconnectedMessageType.BasicMessage && netClient.ConnectedPeersCount == 0 && reader.GetInt() == 1)
+            {
+                logger.LogInfo("[CLIENT] Received discovery response. Connecting to: " + remoteEndPoint);
+                netClient.Connect(remoteEndPoint, "fika.core");
+            }
+        }
+
+        public void OnNetworkLatencyUpdate(NetPeer peer, int latency)
+        {
+            Ping = latency;
+            NetworkGameSession.Rtt = peer.RoundTripTime;
+            NetworkGameSession.LossPercent = (int)NetClient.Statistics.PacketLossPercent;
+        }
+
+        public void OnConnectionRequest(ConnectionRequest request)
+        {
+
+        }
+
+        public void OnPeerDisconnected(NetPeer peer, DisconnectInfo disconnectInfo)
+        {
+            logger.LogInfo("[CLIENT] We disconnected because " + disconnectInfo.Reason);
+            if (disconnectInfo.Reason is DisconnectReason.Timeout)
+            {
+                NotificationManagerClass.DisplayWarningNotification(LocaleUtils.LOST_CONNECTION.Localized());
+                MyPlayer.PacketSender.DestroyThis();
+                Destroy(this);
+                Singleton<FikaClient>.Release(this);
+            }
+
+            if (disconnectInfo.Reason is DisconnectReason.ConnectionRejected)
+            {
+                string reason = disconnectInfo.AdditionalData.GetString();
+                if (!string.IsNullOrEmpty(reason))
+                {
+                    NotificationManagerClass.DisplayWarningNotification(reason);
+                    return;
+                }
+
+                logger.LogError("OnPeerDisconnected: Rejected connection but no reason");
+            }
+        }
+
+        public void RegisterPacket<T>(Action<T> handle) where T : INetSerializable, new()
+        {
+            packetProcessor.SubscribeNetSerializable(handle);
+        }
+
+        public void RegisterPacket<T, TUserData>(Action<T, TUserData> handle) where T : INetSerializable, new()
+        {
+            packetProcessor.SubscribeNetSerializable(handle);
+        }
+
+        public void RegisterReusable<T>(Action<T> handle) where T : class, IReusable, new()
+        {
+            packetProcessor.SubscribeReusable(handle);
+        }
+
+        public void RegisterReusable<T, TUserData>(Action<T, TUserData> handle) where T : class, IReusable, new()
+        {
+            packetProcessor.SubscribeReusable(handle);
+        }
+
+        public void RegisterCustomType<T>(Action<NetDataWriter, T> writeDelegate, Func<NetDataReader, T> readDelegate)
+        {
+            packetProcessor.RegisterNestedType(writeDelegate, readDelegate);
+        }
+
+        public void PrintStatistics()
+        {
+            logger.LogInfo("..:: Fika Client Session Statistics ::..");
+            logger.LogInfo($"Sent packets: {netClient.Statistics.PacketsSent}");
+            logger.LogInfo($"Sent data: {FikaGlobals.FormatFileSize(netClient.Statistics.BytesSent)}");
+            logger.LogInfo($"Received packets: {netClient.Statistics.PacketsReceived}");
+            logger.LogInfo($"Received data: {FikaGlobals.FormatFileSize(netClient.Statistics.BytesReceived)}");
+            logger.LogInfo($"Packet loss: {netClient.Statistics.PacketLossPercent}%");
+        }
+
+        private void HandleInventoryPacket(ref InventoryPacket packet, CoopPlayer player)
+        {
+            if (packet.OperationBytes.Length == 0)
+            {
+                FikaPlugin.Instance.FikaLogger.LogError($"ConvertInventoryPacket::Bytes were null!");
+                return;
+            }
+
+            InventoryController controller = player.InventoryController;
+            if (controller != null)
+            {
+                try
+                {
+                    if (controller is Interface16 networkController)
+                    {
+                        using GClass1212 eftReader = GClass1215.Get(packet.OperationBytes);
+                        BaseDescriptorClass descriptor = eftReader.ReadPolymorph<BaseDescriptorClass>();
+                        GStruct452 result = networkController.CreateOperationFromDescriptor(descriptor);
+                        if (!result.Succeeded)
+                        {
+                            FikaPlugin.Instance.FikaLogger.LogError($"ConvertInventoryPacket::Unable to process descriptor from netId {packet.NetId}, error: {result.Error}");
+                            return;
+                        }
+
+                        inventoryOperations.Enqueue(result.Value);
+                    }
+                }
+                catch (Exception exception)
+                {
+                    FikaPlugin.Instance.FikaLogger.LogError($"ConvertInventoryPacket::Exception thrown: {exception}");
+                }
+            }
+            else
+            {
+                FikaPlugin.Instance.FikaLogger.LogError("ConvertInventoryPacket: inventory was null!");
+            }
+        }
+
+        private void HandleResult(IResult result)
+        {
+            if (result.Failed)
+            {
+                FikaPlugin.Instance.FikaLogger.LogError($"Error in operation: {result.Error}");
+            }
+        }
+    }
 }

@@ -1,102 +1,37 @@
-﻿using EFT.Airdrop;
-using EFT.InventoryLogic;
-using EFT.SynchronizableObjects;
+﻿using EFT.SynchronizableObjects;
 using LiteNetLib.Utils;
-using UnityEngine;
+using System;
+using static Fika.Core.Networking.SpawnSyncObjectSubPackets;
+using static Fika.Core.Networking.SubPacket;
 
 namespace Fika.Core.Networking
 {
-	public struct SpawnSyncObjectPacket(int id) : INetSerializable
-	{
-		public SynchronizableObjectType ObjectType;
-		public int ObjectId = id;
-		public bool IsStatic;
+    public class SpawnSyncObjectPacket : INetSerializable
+    {
+        public SynchronizableObjectType ObjectType;
+        public ISubPacket SubPacket;
 
-		public string GrenadeTemplate;
-		public string GrenadeId;
-		public string ProfileId;
-		public Vector3 ToPosition;
+        public void Deserialize(NetDataReader reader)
+        {
+            ObjectType = (SynchronizableObjectType)reader.GetByte();
+            SubPacket = GetSpawnSyncObjectSubPacket(reader);
+        }
 
-		public EAirdropType AirdropType;
-		public Item AirdropItem;
-		public string ContainerId;
-		public int NetId;
+        public void Serialize(NetDataWriter writer)
+        {
+            writer.Put((byte)ObjectType);
+            SubPacket.Serialize(writer);
+        }
 
-		public Vector3 Position;
-		public Quaternion Rotation;
-
-		public void Deserialize(NetDataReader reader)
-		{
-			ObjectType = (SynchronizableObjectType)reader.GetByte();
-			ObjectId = reader.GetInt();
-			IsStatic = reader.GetBool();
-			switch (ObjectType)
-			{
-				case SynchronizableObjectType.Tripwire:
-					{
-						GrenadeTemplate = reader.GetString();
-						GrenadeId = reader.GetString();
-						ProfileId = reader.GetString();
-						Position = reader.GetVector3();
-						ToPosition = reader.GetVector3();
-						Rotation = reader.GetQuaternion();
-					}
-					break;
-				case SynchronizableObjectType.AirPlane:
-					{
-						Position = reader.GetVector3();
-						Rotation = reader.GetQuaternion();
-					}
-					break;
-				case SynchronizableObjectType.AirDrop:
-					{
-						AirdropType = (EAirdropType)reader.GetByte();
-						AirdropItem = reader.GetAirdropItem();
-						ContainerId = reader.GetString();
-						NetId = reader.GetInt();
-					}
-					break;
-				default:
-					break;
-			}
-		}
-
-		public void Serialize(NetDataWriter writer)
-		{
-			writer.Put((byte)ObjectType);
-			writer.Put(ObjectId);
-			writer.Put(IsStatic);
-			switch (ObjectType)
-			{
-				case SynchronizableObjectType.Tripwire:
-					{
-
-						writer.Put(GrenadeTemplate);
-						writer.Put(GrenadeId);
-						writer.Put(ProfileId);
-						writer.Put(Position);
-						writer.Put(ToPosition);
-						writer.Put(Rotation);
-					}
-					break;
-				case SynchronizableObjectType.AirPlane:
-					{
-
-						writer.Put(Position);
-						writer.Put(Rotation);
-					}
-					break;
-				case SynchronizableObjectType.AirDrop:
-					{
-						writer.Put((byte)AirdropType);
-						writer.PutItem(AirdropItem);
-						writer.Put(ContainerId);
-						writer.Put(NetId);
-					}
-					break;
-				default:
-					break;
-			}
-		}
-	}
+        private ISubPacket GetSpawnSyncObjectSubPacket(NetDataReader reader)
+        {
+            return ObjectType switch
+            {
+                SynchronizableObjectType.AirDrop => new SpawnAirdrop(reader),
+                //SynchronizableObjectType.AirPlane => new SpawnAirplane(reader),
+                SynchronizableObjectType.Tripwire => new SpawnTripwire(reader),
+                _ => throw new ArgumentOutOfRangeException(nameof(ObjectType)),
+            };
+        }
+    }
 }
