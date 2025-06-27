@@ -74,30 +74,11 @@ namespace Fika.Core.Coop.FreeCamera
 
         protected void Start()
         {
-            if (FikaPlugin.AZERTYMode.Value)
-            {
-                forwardKey = KeyCode.Z;
-                backKey = KeyCode.S;
-                leftKey = KeyCode.Q;
-                rightKey = KeyCode.D;
-
-                relUpKey = KeyCode.E;
-                relDownKey = KeyCode.A;
-            }
-
-            showOverlay = FikaPlugin.KeybindOverlay.Value;
-            FikaPlugin.KeybindOverlay.SettingChanged += KeybindOverlay_SettingChanged;
-
             nightVision = CameraClass.Instance.NightVision;
             thermalVision = CameraClass.Instance.ThermalVision;
 
             freeCameraController = Singleton<GameWorld>.Instance.gameObject.GetComponent<FreeCameraController>();
             originalFov = CameraClass.Instance.Fov;
-        }
-
-        private void KeybindOverlay_SettingChanged(object sender, EventArgs e)
-        {
-            showOverlay = FikaPlugin.KeybindOverlay.Value;
         }
 
         public void SetCurrentPlayer(CoopPlayer player)
@@ -202,19 +183,6 @@ namespace Fika.Core.Coop.FreeCamera
             }
 
             List<CoopPlayer> players = [.. coopHandler.HumanPlayers.Where(x => !x.IsYourPlayer && x.HealthController.IsAlive)];
-            // If no alive players, add bots to spectate pool if enabled
-            if (players.Count <= 0 && FikaPlugin.AllowSpectateBots.Value)
-            {
-                isSpectatingBots = true;
-                if (FikaBackendUtils.IsServer)
-                {
-                    players = [.. coopHandler.Players.Values.Where(x => x.IsAI && x.HealthController.IsAlive)];
-                }
-                else
-                {
-                    players = [.. coopHandler.Players.Values.Where(x => x.IsObservedAI && x.HealthController.IsAlive)];
-                }
-            }
 #if DEBUG
             FikaPlugin.Instance.FikaLogger.LogInfo($"Freecam: There are {players.Count} players");
 #endif
@@ -395,19 +363,6 @@ namespace Fika.Core.Coop.FreeCamera
             if (Input.GetKey(rightKey))
             {
                 transform.position += transform.right * (movementSpeed * deltaTime);
-            }
-
-            if (FikaPlugin.DroneMode.Value)
-            {
-                if (Input.GetKey(forwardKey))
-                {
-                    transform.position += GetNormalizedVector3(transform) * (movementSpeed * deltaTime);
-                }
-
-                if (Input.GetKey(backKey))
-                {
-                    transform.position += -GetNormalizedVector3(transform) * (movementSpeed * deltaTime);
-                }
             }
             else
             {

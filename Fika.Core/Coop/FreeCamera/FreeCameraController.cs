@@ -187,21 +187,6 @@ namespace Fika.Core.Coop.FreeCamera
                 }
             }
 
-            if (FikaPlugin.FreeCamButton.Value.IsDown())
-            {
-                if (!FikaPlugin.Instance.AllowFreeCam)
-                {
-                    return;
-                }
-
-                if (quitState == CoopHandler.EQuitState.None)
-                {
-                    ToggleCamera();
-                    ToggleUi();
-                    return;
-                }
-            }
-
             if (quitState == CoopHandler.EQuitState.Extracted && !extracted)
             {
                 FikaPlugin.Instance.FikaLogger.LogDebug($"Freecam: player has extracted");

@@ -118,7 +118,6 @@ namespace Fika.Core.Coop.GameMode
         private CoopExfilManager exfilManager;
         private CoopTimeManager timeManager;
         private CoopHalloweenEventManager halloweenEventManager;
-        private FikaDebug fikaDebug;
         private bool isServer;
         private List<string> localTriggerZones = [];
         private DateTime? gameTime;
@@ -388,24 +387,6 @@ namespace Fika.Core.Coop.GameMode
                 isSpecial = true;
             }
 
-            if (FikaPlugin.EnforcedSpawnLimits.Value && botsController_0.BotSpawner.MaxBots > 0 && Bots.Count >= botsController_0.BotSpawner.MaxBots)
-            {
-                bool despawned = false;
-                if (FikaPlugin.DespawnFurthest.Value)
-                {
-                    despawned = TryDespawnFurthestBot(profile, position, coopHandler);
-                }
-
-                // If it's not special and we didnt despawn something, we dont spawn a new bot.
-                if (!isSpecial && !despawned)
-                {
-#if DEBUG
-                    Logger.LogWarning($"Stopping spawn of bot {profile.Nickname}, max count reached and enforced limits enabled. Current: {Bots.Count}, Max: {botsController_0.BotSpawner.MaxBots}, Alive & Loading: {botsController_0.BotSpawner.AliveAndLoadingBotsCount}");
-#endif
-                    return null;
-                }
-            }
-
             int netId = 1000;
             CoopBot coopBot;
             if (Bots.ContainsKey(profile.Id))
@@ -528,46 +509,6 @@ namespace Fika.Core.Coop.GameMode
         /// <param name="position"></param>
         /// <param name="coopHandler"></param>
         /// <returns></returns>
-        private bool TryDespawnFurthestBot(Profile profile, Vector3 position, CoopHandler coopHandler)
-        {
-            List<CoopPlayer> humanPlayers = BotExtensions.GetPlayers(coopHandler);
-
-            string botKey = BotExtensions.GetFurthestBot(humanPlayers, Bots, out float furthestDistance);
-
-            if (botKey == string.Empty)
-            {
-#if DEBUG
-                Logger.LogWarning("TryDespawnFurthest: botKey was empty");
-#endif
-                return false;
-            }
-
-            if (furthestDistance > BotExtensions.GetDistanceFromPlayers(position, humanPlayers))
-            {
-#if DEBUG
-                Logger.LogWarning($"We're not despawning anything. The furthest bot is closer than the one we wanted to spawn.");
-#endif
-                return false;
-            }
-
-            //Dont despawn inside of dynamic AI range
-            if (furthestDistance < FikaPlugin.DespawnMinimumDistance.Value * FikaPlugin.DespawnMinimumDistance.Value) //Square it because we use sqrMagnitude for distance calculation
-            {
-#if DEBUG
-                Logger.LogWarning($"We're not despawning anything. Furthest despawnable bot is inside minimum despawn range.");
-#endif
-                return false;
-            }
-            Player bot = Bots[botKey];
-#if DEBUG
-            Logger.LogWarning($"Removing {bot.Profile.Info.Settings.Role} at a distance of {Math.Sqrt(furthestDistance)}m from its nearest player.");
-#endif
-            DespawnBot(coopHandler, bot);
-#if DEBUG
-            Logger.LogWarning($"Bot {bot.Profile.Info.Settings.Role} despawned successfully.");
-#endif
-            return true;
-        }
 
         /// <summary>
         /// Despawns a bot
@@ -1000,7 +941,6 @@ namespace Fika.Core.Coop.GameMode
             }
 
             Logger.LogInfo("Adding debug component...");
-            fikaDebug = gameObject.AddComponent<FikaDebug>();
 
             //Destroy(customButton);
 
@@ -1622,13 +1562,6 @@ namespace Fika.Core.Coop.GameMode
                 FikaServer server = Singleton<FikaServer>.Instance;
                 server.RaidInitialized = true;
 
-                if (FikaPlugin.DevMode.Value)
-                {
-                    Logger.LogWarning("DevMode is enabled, skipping wait...");
-                    NotificationManagerClass.DisplayMessageNotification("DevMode enabled, starting automatically...", iconType: EFT.Communications.ENotificationIconType.Note);
-                    RaidStarted = true;
-                }
-
                 while (!RaidStarted)
                 {
                     await Task.Yield();
@@ -1655,17 +1588,6 @@ namespace Fika.Core.Coop.GameMode
             if (FikaBackendUtils.IsHeadlessRequester || FikaPlugin.Instance.AnyoneCanStartRaid)
             {
                 startButton = CreateStartButton() ?? throw new NullReferenceException("Start button could not be created!");
-                if (FikaPlugin.DevMode.Value)
-                {
-                    Logger.LogWarning("DevMode is enabled, skipping wait...");
-                    NotificationManagerClass.DisplayMessageNotification("DevMode enabled, starting automatically...", iconType: EFT.Communications.ENotificationIconType.Note);
-                    FikaClient fikaClient = Singleton<FikaClient>.Instance ?? throw new NullReferenceException("CreateStartButton::FikaClient was null!");
-                    InformationPacket devModePacket = new()
-                    {
-                        RequestStart = true
-                    };
-                    fikaClient.SendData(ref devModePacket, DeliveryMethod.ReliableOrdered);
-                }
             }
             FikaClient client = Singleton<FikaClient>.Instance;
             InformationPacket packet = new();
@@ -1746,30 +1668,6 @@ namespace Fika.Core.Coop.GameMode
                 if (!FikaBackendUtils.IsHeadless)
                 {
                     botsController_0.AddActivePLayer(PlayerOwner.Player);
-                }
-
-                if (FikaPlugin.EnforcedSpawnLimits.Value)
-                {
-                    int limits = Location_0.Id.ToLower() switch
-                    {
-                        "factory4_day" => FikaPlugin.MaxBotsFactory.Value,
-                        "factory4_night" => FikaPlugin.MaxBotsFactory.Value,
-                        "bigmap" => FikaPlugin.MaxBotsCustoms.Value,
-                        "interchange" => FikaPlugin.MaxBotsInterchange.Value,
-                        "rezervbase" => FikaPlugin.MaxBotsReserve.Value,
-                        "woods" => FikaPlugin.MaxBotsWoods.Value,
-                        "shoreline" => FikaPlugin.MaxBotsShoreline.Value,
-                        "tarkovstreets" => FikaPlugin.MaxBotsStreets.Value,
-                        "sandbox" => FikaPlugin.MaxBotsGroundZero.Value,
-                        "laboratory" => FikaPlugin.MaxBotsLabs.Value,
-                        "lighthouse" => FikaPlugin.MaxBotsLighthouse.Value,
-                        _ => 0
-                    };
-
-                    if (limits > 0)
-                    {
-                        botsController_0.BotSpawner.SetMaxBots(limits);
-                    }
                 }
 
                 DynamicAI = gameObject.AddComponent<FikaDynamicAI>();
@@ -2397,15 +2295,6 @@ namespace Fika.Core.Coop.GameMode
 
             Logger.LogDebug("Stop");
 
-            ToggleDebug(false);
-
-            if (fikaDebug != null)
-            {
-                ToggleDebug(false);
-                Destroy(fikaDebug);
-                fikaDebug = null;
-            }
-
             CoopPlayer myPlayer = (CoopPlayer)Singleton<GameWorld>.Instance.MainPlayer;
             myPlayer.PacketSender.DestroyThis();
 
@@ -2712,13 +2601,6 @@ namespace Fika.Core.Coop.GameMode
         /// Toggles the <see cref="FikaDebug"/> menu
         /// </summary>
         /// <param name="enabled"></param>
-        public void ToggleDebug(bool enabled)
-        {
-            if (fikaDebug != null)
-            {
-                fikaDebug.enabled = enabled;
-            }
-        }
 
         /// <summary>
         /// Tells the server that we have left the raid and 

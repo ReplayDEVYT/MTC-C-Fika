@@ -42,13 +42,6 @@ namespace Fika.Core.Coop.Players
     public class ObservedCoopPlayer : CoopPlayer
     {
         #region Fields and Properties
-        public FikaHealthBar HealthBar
-        {
-            get
-            {
-                return healthBar;
-            }
-        }
         public bool ShouldOverlap { get; internal set; }
         public override bool LeftStanceDisabled
         {
@@ -70,7 +63,6 @@ namespace Fika.Core.Coop.Players
         internal ObservedState CurrentPlayerState;
 
         private bool leftStancedDisabled;
-        private FikaHealthBar healthBar = null;
         private Coroutine waitForStartRoutine;
         private bool isServer;
         private VoiceBroadcastTrigger voiceBroadcastTrigger;
@@ -1033,11 +1025,6 @@ namespace Fika.Core.Coop.Players
 
         public override void OnDead(EDamageType damageType)
         {
-            if (HealthBar != null)
-            {
-                Destroy(HealthBar);
-            }
-
             if (FikaPlugin.ShowNotifications.Value)
             {
                 if (!IsObservedAI)
@@ -1392,8 +1379,6 @@ namespace Fika.Core.Coop.Players
                 yield return null;
             }
 
-            healthBar = FikaHealthBar.Create(this);
-
             while (Singleton<GameWorld>.Instance.MainPlayer == null)
             {
                 yield return null;
@@ -1556,10 +1541,6 @@ namespace Fika.Core.Coop.Players
                     HandsController.OnGameSessionEnd();
                     HandsController.Destroy();
                 }
-            }
-            if (HealthBar != null)
-            {
-                Destroy(HealthBar);
             }
             if (Singleton<BetterAudio>.Instantiated)
             {
