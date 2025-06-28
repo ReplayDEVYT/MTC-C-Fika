@@ -1473,7 +1473,7 @@ namespace Fika.Core.Coop.GameMode
             return myPlayer;
         }
 
-        private void CreateSpawnSystem()
+        public void CreateSpawnSystem()
         {
             spawnPoints = SpawnPointManagerClass.CreateFromScene(new DateTime?(EFTDateTimeClass.LocalDateTimeFromUnixTime(Location_0.UnixDateTime)),
                                     Location_0.SpawnPointParams);

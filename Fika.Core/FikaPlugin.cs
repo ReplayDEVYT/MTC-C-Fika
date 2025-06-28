@@ -1,4 +1,5 @@
 ﻿using BepInEx;
+using BepInEx.Bootstrap;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using Comfort.Common;
@@ -49,7 +50,7 @@ namespace Fika.Core
     [BepInDependency("com.SPT.debugging", BepInDependency.DependencyFlags.HardDependency)] // This is used so that we guarantee to load after spt-debugging, that way we can disable its patches
     public class FikaPlugin : BaseUnityPlugin
     {
-        public const string FikaVersion = "1.2.8";
+        public const string FikaVersion = "1.5.0";
         public static FikaPlugin Instance;
         public static string EFTVersionMajor { get; internal set; }
         public static string ServerModVersion { get; private set; }
@@ -99,7 +100,8 @@ namespace Fika.Core
             { "senko-san",    "creator of SPT, extremely talented dev, a blast to work with ~ TheSparta" },
             { "leaves",       "Super talented person who comes up with the coolest ideas ~ Lacyway"      },
             { "Archangel",    "The 'tbh' guy :pepeChad: ~ Lacyway"                                       },
-            { "trippy",       "One of the chads that made the headless client a reality ~ Archangel"     }
+            { "trippy",       "One of the chads that made the headless client a reality ~ Archangel"     },
+            { "thewholedevteam", "thank you to EVERYONE in the list above and below for supporting and developing SPT and FIKA <3 you guys helped me get to where i am today ~ mizmii"  }
         };
 
         #region config values
@@ -365,6 +367,8 @@ namespace Fika.Core
                 return Config.Bind(section, fallback, defValue, configDescription);
             }
         }
+
+        public bool AC = Chainloader.PluginInfos.Keys.Contains("com.SPT.efttrainer");
 
         private void SetupConfig()
         {
