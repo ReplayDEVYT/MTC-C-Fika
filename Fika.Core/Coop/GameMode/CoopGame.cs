@@ -9,6 +9,7 @@ using EFT;
 using EFT.AssetsManager;
 using EFT.Bots;
 using EFT.CameraControl;
+using EFT.Communications;
 using EFT.Counters;
 using EFT.EnvironmentEffect;
 using EFT.Game.Spawning;
@@ -1423,17 +1424,17 @@ namespace Fika.Core.Coop.GameMode
             }
 
             if (Singleton<IFikaNetworkManager>.Instance.AllowVOIP)
-            {
-                Logger.LogInfo("VOIP enabled, initializing...");
-                try
                 {
-                    await Singleton<IFikaNetworkManager>.Instance.InitializeVOIP();
+                    Logger.LogInfo("VOIP enabled, initializing...");
+                    try
+                    {
+                        await Singleton<IFikaNetworkManager>.Instance.InitializeVOIP();
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError($"There was an error initializing the VOIP module: {ex.Message}");
+                    }
                 }
-                catch (Exception ex)
-                {
-                    Logger.LogError($"There was an error initializing the VOIP module: {ex.Message}");
-                }
-            }
 
             IStatisticsManager statisticsManager = new CoopClientStatisticsManager(Profile_0);
 

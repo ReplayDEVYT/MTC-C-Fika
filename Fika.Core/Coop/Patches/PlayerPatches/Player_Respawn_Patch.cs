@@ -36,11 +36,6 @@ namespace Fika.Core.Coop.Patches
                 return true;
             }
 
-            if (FikaPlugin.Instance.AC)
-            {
-                return true;
-            }
-
             ISpawnPoint spawnpoint = CoopGame.Instance.SpawnSystem.SelectSpawnPoint(ESpawnCategory.Player, profile.Info.Side, null, null, null, null, profile.Id);
             
             player.Transform.position = spawnpoint.Position;

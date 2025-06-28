@@ -21,7 +21,7 @@ namespace Fika.Core.Networking.VOIP
             GClass2044 pushToTalkSettings = FikaGlobals.VOIPHandler.PushToTalkSettings;
             BlockingTime = TimeSpan.FromSeconds(pushToTalkSettings.BlockingTime);
             SpeakingSecondsInterval = TimeSpan.FromSeconds(pushToTalkSettings.SpeakingSecondsInterval);
-            SpeakingSecondsLimit = TimeSpan.FromSeconds(pushToTalkSettings.SpeakingSecondsLimit);
+            SpeakingSecondsLimit = TimeSpan.FromSeconds(99f);
             SpeakDelayBetweenLimit = SpeakingSecondsInterval - SpeakingSecondsLimit;
 
             if (DissonanceComms == null)

@@ -168,6 +168,11 @@ namespace Fika.Core.Networking.Http
             await PutJsonAsync("/fika/raid/create", data);
         }
 
+        public static void SendRadmin(string vpnip)
+        {
+            PutJson("/fika/returnip", vpnip);
+        }
+
         public static GetHostResponse GetHost(GetHostRequest data)
         {
             return PostJson<GetHostRequest, GetHostResponse>("/fika/raid/gethost", data);

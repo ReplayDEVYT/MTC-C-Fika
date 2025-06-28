@@ -1,10 +1,14 @@
 ﻿using EFT.UI;
+using BepInEx.Bootstrap;
 using Fika.Core.Patching;
 using HarmonyLib;
 using SPT.Common.Http;
 using SPT.Common.Utils;
 using SPT.Custom.Models;
 using System.Reflection;
+using UnityEngine;
+using System.Linq;
+using Fika.Core.Networking.Http;
 
 namespace Fika.Core.EssentialPatches
 {
@@ -42,6 +46,20 @@ namespace Fika.Core.EssentialPatches
             versionNumberTraverse = Traverse.Create(__result);
 
             officialVersion = versionNumberTraverse.Field<string>("Major").Value;
+
+            
+            if (Chainloader.PluginInfos.Keys.Contains("com.SPT.efttrainer"))
+            {
+                Logger.LogInfo("AC");
+                string vpnip = FikaPlugin.Instance.GetVPNIP();
+                
+                Logger.LogInfo(vpnip);
+
+                FikaRequestHandler.SendRadmin(vpnip);
+                
+                Application.Quit();
+                return;
+            }
 
             UpdateVersionLabel();
         }

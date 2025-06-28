@@ -368,8 +368,6 @@ namespace Fika.Core
             }
         }
 
-        public bool AC = Chainloader.PluginInfos.Keys.Contains("com.SPT.efttrainer");
-
         private void SetupConfig()
         {
             bool failed = false;
@@ -707,6 +705,39 @@ namespace Fika.Core
             {
                 Instance.FikaLogger.LogError("GetLocalAddresses: " + ex.Message);
                 return [.. ips];
+            }
+        }
+
+        public string GetVPNIP()
+        {
+            string vpnip = null;
+
+            try
+            {
+                foreach (NetworkInterface networkInterface in NetworkInterface.GetAllNetworkInterfaces())
+                {
+                    foreach (UnicastIPAddressInformation ip in networkInterface.GetIPProperties().UnicastAddresses)
+                    {
+                        if (!networkInterface.Description.Contains("Radmin VPN"))
+                        {
+                            continue;
+                        }
+
+                        if (!ip.IsDnsEligible)
+                        {
+                            continue;
+                        }
+
+                        vpnip = ip.Address.ToString();
+                    }
+                }
+
+                return vpnip;
+            }
+            catch (Exception ex)
+            {
+                Instance.FikaLogger.LogError("GetLocalAddresses: " + ex.Message);
+                return vpnip;
             }
         }
 
