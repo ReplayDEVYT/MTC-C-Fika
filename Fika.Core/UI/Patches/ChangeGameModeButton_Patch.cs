@@ -19,8 +19,8 @@ namespace Fika.Core.UI.Patches
         private static bool PrefixChange(TextMeshProUGUI ____buttonLabel, TextMeshProUGUI ____buttonDescription, Image ____buttonDescriptionIcon,
             GameObject ____availableState)
         {
-            ____buttonLabel.text = "PvE";
-            ____buttonDescription.text = $"Fika will always be {ColorizeText(EColor.BLUE, "PvE")}";
+            ____buttonLabel.text = "Competitive PvP";
+            ____buttonDescription.text = $"You are currently playing the {ColorizeText(EColor.BLUE, "PvP")} gamemode.";
             ____buttonDescriptionIcon.gameObject.SetActive(false);
             ____availableState.SetActive(true);
             return false;

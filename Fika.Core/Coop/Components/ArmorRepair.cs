@@ -64,7 +64,7 @@ namespace Fika.Core.Coop.Components
 
         private static void RepairItems(List<EquipmentSlot> slots, bool isArmor)
         {
-            float repairRate = isArmor ? 2f : 2f;
+            float repairRate = isArmor ? 0.5f : 0.5f;
 
             foreach (var slot in slots)
             {

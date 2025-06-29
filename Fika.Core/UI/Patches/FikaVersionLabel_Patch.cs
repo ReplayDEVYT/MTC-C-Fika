@@ -9,6 +9,8 @@ using System.Reflection;
 using UnityEngine;
 using System.Linq;
 using Fika.Core.Networking.Http;
+using static Fika.Core.UI.FikaUIGlobals;
+using Fika.Core.UI;
 
 namespace Fika.Core.EssentialPatches
 {
@@ -75,15 +77,15 @@ namespace Fika.Core.EssentialPatches
             else
             {
 #if DEBUG
-                preloaderUiTraverse.Field("string_2").SetValue($"FIKA {FikaPlugin.FikaVersion} (DEBUG) | {versionLabel}");
+                preloaderUiTraverse.Field("string_2").SetValue($"{ColorizeText(EColor.BLUE, "MTC-C")} {FikaPlugin.FikaVersion} (DEBUG) | {versionLabel}");
 #else
-                preloaderUiTraverse.Field("string_2").SetValue($"FIKA {FikaPlugin.FikaVersion} | {versionLabel}");
+                preloaderUiTraverse.Field("string_2").SetValue($"{ColorizeText(EColor.BLUE, "MTC-C")} | {fikaVersion}");
 #endif
                 versionNumberTraverse.Field("Major").SetValue($"{FikaPlugin.FikaVersion} {versionLabel}");
             }
 
             // Game mode
-            //preloaderUiTraverse.Field("string_4").SetValue("PvE");
+            preloaderUiTraverse.Field("string_5").SetValue("PvP");
             // Update version label
             preloaderUiTraverse.Method("method_6").GetValue();
         }
