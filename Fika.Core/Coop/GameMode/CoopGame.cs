@@ -382,7 +382,9 @@ namespace Fika.Core.Coop.GameMode
             }
 
             WildSpawnType role = profile.Info.Settings.Role;
+#pragma warning disable CS0219 // Variable is assigned but its value is never used
             bool isSpecial = false;
+#pragma warning restore CS0219 // Variable is assigned but its value is never used
             if (role is not WildSpawnType.pmcUSEC and not WildSpawnType.pmcBEAR and not WildSpawnType.assault)
             {
                 isSpecial = true;
@@ -804,6 +806,8 @@ namespace Fika.Core.Coop.GameMode
             }
         }
 
+        bool spawnEnds => RaidSettings.PlayersSpawnPlace == EPlayersSpawnPlace.AtTheEndsOfTheMap;
+
         /// <summary>
         /// Sends or receives the <see cref="ISpawnPoint"/> for the game
         /// </summary>
@@ -813,8 +817,11 @@ namespace Fika.Core.Coop.GameMode
             bool spawnTogether = RaidSettings.PlayersSpawnPlace == EPlayersSpawnPlace.SamePlace;
             if (!spawnTogether)
             {
-                Logger.LogInfo("Using random spawn points!");
-                NotificationManagerClass.DisplayMessageNotification(LocaleUtils.RANDOM_SPAWNPOINTS.Localized(), iconType: EFT.Communications.ENotificationIconType.Alert);
+                if (!spawnTogether && !spawnEnds)
+                {
+                    Logger.LogInfo("Using random spawn points!");
+                    NotificationManagerClass.DisplayMessageNotification(LocaleUtils.RANDOM_SPAWNPOINTS.Localized(), iconType: EFT.Communications.ENotificationIconType.Alert);
+                }
 
                 if (!isServer)
                 {
@@ -823,9 +830,16 @@ namespace Fika.Core.Coop.GameMode
                 return;
             }
 
+            if (spawnEnds)
+            {
+                Logger.LogInfo("Using spawn points at the ends of the map!");
+                NotificationManagerClass.DisplayMessageNotification("Using 1v1 spawns", iconType: EFT.Communications.ENotificationIconType.Alert);
+            }
+
             if (!isServer && spawnTogether)
             {
                 SetMatchmakerStatus(LocaleUtils.UI_RETRIEVE_SPAWN_INFO.Localized());
+                NotificationManagerClass.DisplayMessageNotification("Spawning near other players! Hold your fire.", iconType: EFT.Communications.ENotificationIconType.Alert);
 
                 RequestPacket packet = new()
                 {
@@ -1482,6 +1496,10 @@ namespace Fika.Core.Coop.GameMode
             SpawnSettingsStruct settings = new(Location_0.MinDistToFreePoint, Location_0.MaxDistToFreePoint, Location_0.MaxBotPerZone, spawnSafeDistance);
             SpawnSystem = SpawnSystemCreatorClass.CreateSpawnSystem(settings, FikaGlobals.GetApplicationTime, Singleton<GameWorld>.Instance, botsController_0, spawnPoints);
             spawnPoint = SpawnSystem.SelectSpawnPoint(ESpawnCategory.Player, Profile_0.Info.Side, null, null, null, null, Profile_0.Id);
+            if (spawnEnds)
+            {
+                spawnPoint = SpawnSystem.SelectSpawnPoint(ESpawnCategory.Opposite, Profile_0.Info.Side, null, null, null, null, Profile_0.Id);
+            }
             InfiltrationPoint = string.IsNullOrEmpty(HostSpawnPoint.Infiltration) ? "MissingInfiltration" : spawnPoint.Infiltration;
             if (!isServer)
             {

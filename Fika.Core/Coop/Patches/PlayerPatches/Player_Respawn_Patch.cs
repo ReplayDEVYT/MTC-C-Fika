@@ -50,6 +50,7 @@ namespace Fika.Core.Coop.Patches
 
                 __instance.RestoreFullHealth();
                 __instance.DoPainKiller();
+                __instance.DoContusion(2, 10);
             });
 
             return false;
