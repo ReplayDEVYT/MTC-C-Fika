@@ -77,9 +77,9 @@ namespace Fika.Core.EssentialPatches
             else
             {
 #if DEBUG
-                preloaderUiTraverse.Field("string_2").SetValue($"{ColorizeText(EColor.BLUE, "MTC-C")} {FikaPlugin.FikaVersion} (DEBUG) | {versionLabel}");
+                preloaderUiTraverse.Field("string_2").SetValue($"{ColorizeText(EColor.BLUE, "MTC-C")} {FikaPlugin.FikaVersion} (DEBUG) | {versionLabel} | {FikaPlugin.Crc32}");
 #else
-                preloaderUiTraverse.Field("string_2").SetValue($"{ColorizeText(EColor.BLUE, "MTC-C")} | {fikaVersion}");
+                preloaderUiTraverse.Field("string_2").SetValue($"{ColorizeText(EColor.BLUE, "MTC-C")} | {FikaPlugin.FikaVersion} | {FikaPlugin.Crc32}");
 #endif
                 versionNumberTraverse.Field("Major").SetValue($"{FikaPlugin.FikaVersion} {versionLabel}");
             }
