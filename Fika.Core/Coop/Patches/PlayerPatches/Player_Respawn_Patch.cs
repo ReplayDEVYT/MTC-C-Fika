@@ -34,8 +34,6 @@ namespace Fika.Core.Coop.Patches
 
         private static DateTime LastRespawn = DateTime.Now;
 
-        private static ISpawnPoint spawnpoint = null;
-
         protected override MethodBase GetTargetMethod()
         {
             //Check for gclass increments
@@ -48,17 +46,16 @@ namespace Fika.Core.Coop.Patches
             Player player = __instance.Player;
 
             Profile profile = player.Profile;
+            
+            ISpawnPoint spawnpoint = null;
 
-            if (spawnpoint == null)
+            try
             {
-                try
-                {
-                    spawnpoint = CoopGame.Instance.SpawnSystem.SelectSpawnPoint(ESpawnCategory.Player, profile.Info.Side, null, null, null, null, profile.Id);
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogError($"Error selecting spawn point: {ex}");
-                }
+                spawnpoint = CoopGame.Instance.SpawnSystem.SelectSpawnPoint(ESpawnCategory.Player, profile.Info.Side, null, null, null, null, profile.Id);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Error selecting spawn point: {ex}");
             }
 
             if (!player.IsYourPlayer || player.IsAI) { return false; }
