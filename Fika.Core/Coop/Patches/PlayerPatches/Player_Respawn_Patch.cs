@@ -13,6 +13,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel.Design;
 using System.Drawing;
+using System.Linq.Expressions;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Threading.Tasks;
@@ -31,6 +32,12 @@ namespace Fika.Core.Coop.Patches
 
         private static DateTime LastMessage = DateTime.Now;
 
+        private static DateTime LastRespawn = DateTime.Now;
+
+        private static bool HasPainkiller = false;
+
+        private static ISpawnPoint spawnpoint = null;
+
         protected override MethodBase GetTargetMethod()
         {
             //Check for gclass increments
@@ -44,37 +51,69 @@ namespace Fika.Core.Coop.Patches
 
             Profile profile = player.Profile;
 
-            if (player.IsAI)
+            if (spawnpoint == null)
             {
-                return true;
+                try
+                {
+                    spawnpoint = CoopGame.Instance.SpawnSystem.SelectSpawnPoint(ESpawnCategory.Player, profile.Info.Side, null, null, null, null, profile.Id);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"Error selecting spawn point: {ex}");
+                }
             }
+
+            if (player.IsAI) { return false; }
+
+            if (!player.IsYourPlayer) { return false; }
 
             try
             {
-                ISpawnPoint spawnpoint = CoopGame.Instance.SpawnSystem.SelectSpawnPoint(ESpawnCategory.Player, profile.Info.Side, null, null, null, null, profile.Id);
-
-                player.Transform.position = spawnpoint.Position;
-                player.Transform.rotation = spawnpoint.Rotation;
-
-                Task.Delay(500).ContinueWith(T =>
+                if (DateTime.Now - LastMessage > TimeSpan.FromSeconds(2))
                 {
-                    foreach (EBodyPart BodyPart in Enum.GetValues(typeof(EBodyPart))) // Remove negative effects
-                    {
-                        __instance.method_18(BodyPart, (ignore) => true);
-                    }
-
-                    __instance.RestoreFullHealth();
-                    __instance.DoPainKiller();
-                    __instance.DoContusion(2, 10);
-                });
-
-                Respawns++;
-
-                if (DateTime.Now - LastMessage > TimeSpan.FromSeconds(1))
-                {
-                    NotificationManagerClass.DisplayMessageNotification("Respawns: "+ Respawns, ENotificationDurationType.Default, ENotificationIconType.Alert, UnityEngine.Color.white);
+                    Respawns++;
+                    NotificationManagerClass.DisplayMessageNotification($"Respawns: {Respawns}", ENotificationDurationType.Default, ENotificationIconType.Alert, UnityEngine.Color.white);
                     Singleton<GUISounds>.Instance.PlayUISound(EUISoundType.PlayerIsDead);
                     LastMessage = DateTime.Now;
+                }
+
+                if (DateTime.Now - LastRespawn > TimeSpan.FromSeconds(2))
+                {
+                    player.Transform.position = spawnpoint.Position;
+                    player.Transform.rotation = spawnpoint.Rotation;
+
+                    player.MovementContext.ReleaseDoorIfInteractingWithOne();
+
+                    if (player.MovementContext.StationaryWeapon != null)
+                    {
+                        player.MovementContext.StationaryWeapon.Show();
+                        player.ReleaseHand();
+                    }
+
+                    GClass3756.ReleaseBeginSample("Player.OnDead.SoundWork", "OnDead");
+                    try
+                    {
+                        player.Speaker.Play(EPhraseTrigger.OnDeath, player.HealthStatus, demand: true);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError($"Error in Player.OnDead.SoundWork: {ex}");
+                    }
+
+                    player.InventoryController.UnregisterView(player);
+                    player.PlayDeathSound();
+
+                    Task.Delay(50).ContinueWith(T =>
+                    {
+                        foreach (EBodyPart BodyPart in Enum.GetValues(typeof(EBodyPart))) // Remove negative effects
+                        {
+                            __instance.method_18(BodyPart, (ignore) => true);
+                        }
+
+                        __instance.RestoreFullHealth();
+                        __instance.DoPainKiller();
+                        __instance.DoContusion(2, 10);
+                    });
                 }
             }
             catch (Exception ex)
