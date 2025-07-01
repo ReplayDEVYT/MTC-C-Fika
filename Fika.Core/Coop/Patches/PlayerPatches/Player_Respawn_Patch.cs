@@ -34,8 +34,6 @@ namespace Fika.Core.Coop.Patches
 
         private static DateTime LastRespawn = DateTime.Now;
 
-        private static bool HasPainkiller = false;
-
         private static ISpawnPoint spawnpoint = null;
 
         protected override MethodBase GetTargetMethod()
@@ -63,9 +61,7 @@ namespace Fika.Core.Coop.Patches
                 }
             }
 
-            if (player.IsAI) { return false; }
-
-            if (!player.IsYourPlayer) { return false; }
+            if (!player.IsYourPlayer || player.IsAI) { return false; }
 
             try
             {
@@ -76,45 +72,40 @@ namespace Fika.Core.Coop.Patches
                     Singleton<GUISounds>.Instance.PlayUISound(EUISoundType.PlayerIsDead);
                     LastMessage = DateTime.Now;
                 }
+                player.Transform.position = spawnpoint.Position;
+                player.Transform.rotation = spawnpoint.Rotation;
 
-                if (DateTime.Now - LastRespawn > TimeSpan.FromSeconds(2))
+                player.MovementContext.ReleaseDoorIfInteractingWithOne();
+
+                if (player.MovementContext.StationaryWeapon != null)
                 {
-                    player.Transform.position = spawnpoint.Position;
-                    player.Transform.rotation = spawnpoint.Rotation;
-
-                    player.MovementContext.ReleaseDoorIfInteractingWithOne();
-
-                    if (player.MovementContext.StationaryWeapon != null)
-                    {
-                        player.MovementContext.StationaryWeapon.Show();
-                        player.ReleaseHand();
-                    }
-
-                    GClass3756.ReleaseBeginSample("Player.OnDead.SoundWork", "OnDead");
-                    try
-                    {
-                        player.Speaker.Play(EPhraseTrigger.OnDeath, player.HealthStatus, demand: true);
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.LogError($"Error in Player.OnDead.SoundWork: {ex}");
-                    }
-
-                    player.InventoryController.UnregisterView(player);
-                    player.PlayDeathSound();
-
-                    Task.Delay(50).ContinueWith(T =>
-                    {
-                        foreach (EBodyPart BodyPart in Enum.GetValues(typeof(EBodyPart))) // Remove negative effects
-                        {
-                            __instance.method_18(BodyPart, (ignore) => true);
-                        }
-
-                        __instance.RestoreFullHealth();
-                        __instance.DoPainKiller();
-                        __instance.DoContusion(2, 10);
-                    });
+                    player.MovementContext.StationaryWeapon.Show();
+                    player.ReleaseHand();
                 }
+
+                GClass3756.ReleaseBeginSample("Player.OnDead.SoundWork", "OnDead");
+                try
+                {
+                    player.Speaker.Play(EPhraseTrigger.OnDeath, player.HealthStatus, demand: true);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"Error in Player.OnDead.SoundWork: {ex}");
+                }
+
+                player.InventoryController.UnregisterView(player);
+                player.PlayDeathSound();
+
+                RespawnHelper.DelayedAction(() =>
+                {
+                    foreach (EBodyPart BodyPart in Enum.GetValues(typeof(EBodyPart)))
+                    {
+                        __instance.method_18(BodyPart, (ignore) => true);
+                    }
+                    __instance.RestoreFullHealth();
+                    __instance.DoPainKiller();
+                    __instance.DoContusion(2, 10);
+                }, 0.05f);
             }
             catch (Exception ex)
             {
