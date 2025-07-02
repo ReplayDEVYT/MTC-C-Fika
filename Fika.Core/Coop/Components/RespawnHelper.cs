@@ -1,7 +1,9 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using EFT;
 using EFT.InventoryLogic;
+using HarmonyLib;
 using UnityEngine;
 
 public class RespawnHelper : MonoBehaviour
@@ -23,9 +25,9 @@ public class RespawnHelper : MonoBehaviour
     private static InventoryController inventoryController = null;
     internal static Slot slotContents;
 
-    public void RepairAll(InventoryController controller)
+    public void RepairAll(Player player)
     {
-        inventoryController = controller;
+        inventoryController = (InventoryController)AccessTools.Field(typeof(Player), "_inventoryController").GetValue(player);
 
         RepairItems(equipmentSlotDictionary, true);
         RepairItems(weaponSlotDictionary, false);
@@ -60,8 +62,6 @@ public class RespawnHelper : MonoBehaviour
 
     private static void RepairItems(List<EquipmentSlot> slots, bool isArmor)
     {
-        float repairRate = isArmor ? 2f : 2f;
-
         foreach (var slot in slots)
         {
             var slotContents = GetEquipSlot(slot);
