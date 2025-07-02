@@ -625,7 +625,7 @@ namespace Fika.Core.UI.Custom
                     }
 
                     tooltipArea = joinButton.GetOrAddComponent<HoverTooltipArea>();
-                    tooltipArea.enabled = true;
+                    tooltipArea.enabled = true; 
                     tooltipArea.SetMessageText(LocaleUtils.UI_CANNOT_JOIN_RAID_OTHER_TIME.Localized());
 
                     continue;

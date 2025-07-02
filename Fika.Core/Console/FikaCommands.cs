@@ -358,8 +358,6 @@ namespace Fika.Core.Console
                 ConsoleScreen.LogWarning("Game is not running.");
                 return;
             }
-
-            coopGame.ToggleDebug(state);
         }
 
         [ConsoleCommand("clear", "", null, "Clears the console output", [])]

@@ -396,7 +396,6 @@ namespace Fika.Core.Networking
             RegisterPacket<SyncTransitControllersPacket, NetPeer>(OnSyncTransitControllersPacketReceived);
             RegisterPacket<TransitInteractPacket, NetPeer>(OnTransitInteractPacketReceived);
             RegisterPacket<BotStatePacket, NetPeer>(OnBotStatePacketReceived);
-            RegisterPacket<PingPacket, NetPeer>(OnPingPacketReceived);
             RegisterPacket<LoadingProfilePacket, NetPeer>(OnLoadingProfilePacketReceived);
             RegisterPacket<SideEffectPacket, NetPeer>(OnSideEffectPacketReceived);
             RegisterPacket<RequestPacket, NetPeer>(OnRequestPacketReceived);
@@ -544,16 +543,6 @@ namespace Fika.Core.Networking
             SendDataToAll(ref notifPacket, DeliveryMethod.ReliableOrdered, peer);
 
             peer.Tag = kvp.Key.Info.MainProfileNickname;
-        }
-
-        private void OnPingPacketReceived(PingPacket packet, NetPeer peer)
-        {
-            SendDataToAll(ref packet, DeliveryMethod.ReliableOrdered, peer);
-
-            if (FikaPlugin.UsePingSystem.Value)
-            {
-                PingFactory.ReceivePing(packet.PingLocation, packet.PingType, packet.PingColor, packet.Nickname, packet.LocaleId);
-            }
         }
 
         private void OnBotStatePacketReceived(BotStatePacket packet, NetPeer peer)
@@ -737,7 +726,6 @@ namespace Fika.Core.Networking
 
                             SendDataToPeer(peer, ref ownCharacterPacket, DeliveryMethod.ReliableOrdered);
 
-                            observedCoopPlayer.HealthBar.ClearEffects();
                             GenericPacket clearEffectsPacket = new()
                             {
                                 NetId = observedCoopPlayer.NetId,

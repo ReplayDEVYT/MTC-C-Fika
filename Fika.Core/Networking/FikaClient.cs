@@ -265,7 +265,6 @@ namespace Fika.Core.Networking
             RegisterPacket<SyncTransitControllersPacket>(OnSyncTransitControllersPacketReceived);
             RegisterPacket<TransitEventPacket>(OnTransitEventPacketReceived);
             RegisterPacket<BotStatePacket>(OnBotStatePacketReceived);
-            RegisterPacket<PingPacket>(OnPingPacketReceived);
             RegisterPacket<LoadingProfilePacket>(OnLoadingProfilePacketReceived);
             RegisterPacket<SideEffectPacket>(OnSideEffectPacketReceived);
             RegisterPacket<RequestPacket>(OnRequestPacketReceived);
@@ -435,14 +434,6 @@ namespace Fika.Core.Networking
             }
 
             logger.LogWarning("OnLoadingProfilePacketReceived: Profiles was null!");
-        }
-
-        private void OnPingPacketReceived(PingPacket packet)
-        {
-            if (FikaPlugin.UsePingSystem.Value)
-            {
-                PingFactory.ReceivePing(packet.PingLocation, packet.PingType, packet.PingColor, packet.Nickname, packet.LocaleId);
-            }
         }
 
         private void OnBotStatePacketReceived(BotStatePacket packet)

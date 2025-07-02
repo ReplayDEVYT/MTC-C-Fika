@@ -220,14 +220,6 @@ namespace Fika.Core.Networking
                     FikaPlugin.Instance.FikaLogger.LogError("ClientExtract: CoopHandler was null!");
                     return;
                 }
-
-                if (coopHandler.Players.TryGetValue(NetId, out CoopPlayer playerToApply))
-                {
-                    if (playerToApply is ObservedCoopPlayer observedPlayer)
-                    {
-                        observedPlayer.HealthBar.ClearEffects();
-                    }
-                }
             }
 
             public void Serialize(NetDataWriter writer)

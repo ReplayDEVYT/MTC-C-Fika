@@ -1,11 +1,15 @@
 ﻿using BepInEx;
+using BepInEx.Bootstrap;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using Comfort.Common;
 using Diz.Utils;
+using EFT;
+using EFT.InventoryLogic;
 using EFT.UI;
 using Fika.Core.Bundles;
 using Fika.Core.Console;
+using Fika.Core.Coop.Components;
 using Fika.Core.Coop.Custom;
 using Fika.Core.Coop.Utils;
 using Fika.Core.EssentialPatches;
@@ -20,6 +24,7 @@ using Fika.Core.Utils;
 using SPT.Common.Http;
 using SPT.Custom.Patches;
 using SPT.Custom.Utils;
+using SPT.Reflection.Patching;
 using SPT.SinglePlayer.Patches.MainMenu;
 using SPT.SinglePlayer.Patches.RaidFix;
 using SPT.SinglePlayer.Patches.ScavMode;
@@ -49,7 +54,7 @@ namespace Fika.Core
     [BepInDependency("com.SPT.debugging", BepInDependency.DependencyFlags.HardDependency)] // This is used so that we guarantee to load after spt-debugging, that way we can disable its patches
     public class FikaPlugin : BaseUnityPlugin
     {
-        public const string FikaVersion = "1.2.8";
+        public const string FikaVersion = "1.5.0";
         public static FikaPlugin Instance;
         public static string EFTVersionMajor { get; internal set; }
         public static string ServerModVersion { get; private set; }
@@ -99,7 +104,8 @@ namespace Fika.Core
             { "senko-san",    "creator of SPT, extremely talented dev, a blast to work with ~ TheSparta" },
             { "leaves",       "Super talented person who comes up with the coolest ideas ~ Lacyway"      },
             { "Archangel",    "The 'tbh' guy :pepeChad: ~ Lacyway"                                       },
-            { "trippy",       "One of the chads that made the headless client a reality ~ Archangel"     }
+            { "trippy",       "One of the chads that made the headless client a reality ~ Archangel"     },
+            { "thewholedevteam", "thank you to EVERYONE in the list above and below for supporting and developing SPT and FIKA <3 you guys helped me get to where i am today ~ mizmii"  }
         };
 
         #region config values
@@ -109,7 +115,6 @@ namespace Fika.Core
 
         //Advanced
         public static ConfigEntry<bool> OfficialVersion { get; set; }
-        public static ConfigEntry<bool> DevMode { get; set; }
 
         // Coop
         public static ConfigEntry<bool> UseHeadlessIfAvailable { get; set; }
@@ -122,25 +127,6 @@ namespace Fika.Core
         public static ConfigEntry<bool> EnableOnlinePlayers { get; set; }
         public static ConfigEntry<float> OnlinePlayersScale { get; set; }
 
-        // Coop | Name Plates
-        public static ConfigEntry<bool> UseNamePlates { get; set; }
-        public static ConfigEntry<bool> HideHealthBar { get; set; }
-        public static ConfigEntry<bool> UseHealthNumber { get; set; }
-        public static ConfigEntry<bool> UsePlateFactionSide { get; set; }
-        public static ConfigEntry<bool> HideNamePlateInOptic { get; set; }
-        public static ConfigEntry<bool> NamePlateUseOpticZoom { get; set; }
-        public static ConfigEntry<bool> DecreaseOpacityNotLookingAt { get; set; }
-        public static ConfigEntry<float> NamePlateScale { get; set; }
-        public static ConfigEntry<float> OpacityInADS { get; set; }
-        public static ConfigEntry<float> MaxDistanceToShow { get; set; }
-        public static ConfigEntry<float> MinimumOpacity { get; set; }
-        public static ConfigEntry<float> MinimumNamePlateScale { get; set; }
-        public static ConfigEntry<bool> ShowEffects { get; set; }
-        public static ConfigEntry<bool> UseOcclusion { get; set; }
-        public static ConfigEntry<Color> FullHealthColor { get; set; }
-        public static ConfigEntry<Color> LowHealthColor { get; set; }
-        public static ConfigEntry<Color> NamePlateTextColor { get; set; }
-
         // Coop | Quest Sharing
         public static ConfigEntry<EQuestSharingTypes> QuestTypesToShareAndReceive { get; set; }
         public static ConfigEntry<bool> QuestSharingNotifications { get; set; }
@@ -148,48 +134,12 @@ namespace Fika.Core
         public static ConfigEntry<bool> SharedKillExperience { get; set; }
         public static ConfigEntry<bool> SharedBossExperience { get; set; }
 
-        // Coop | Pinging
-        public static ConfigEntry<bool> UsePingSystem { get; set; }
-        public static ConfigEntry<KeyboardShortcut> PingButton { get; set; }
-        public static ConfigEntry<Color> PingColor { get; set; }
-        public static ConfigEntry<float> PingSize { get; set; }
-        public static ConfigEntry<int> PingTime { get; set; }
-        public static ConfigEntry<bool> PlayPingAnimation { get; set; }
-        public static ConfigEntry<bool> ShowPingDuringOptics { get; set; }
-        public static ConfigEntry<bool> PingUseOpticZoom { get; set; }
-        public static ConfigEntry<bool> PingScaleWithDistance { get; set; }
-        public static ConfigEntry<float> PingMinimumOpacity { get; set; }
-        public static ConfigEntry<bool> ShowPingRange { get; set; }
-        public static ConfigEntry<EPingSound> PingSound { get; set; }
-
-        // Coop | Debug
-        public static ConfigEntry<KeyboardShortcut> FreeCamButton { get; set; }
-        public static ConfigEntry<bool> AllowSpectateBots { get; set; }
-        public static ConfigEntry<bool> AZERTYMode { get; set; }
-        public static ConfigEntry<bool> DroneMode { get; set; }
-        public static ConfigEntry<bool> KeybindOverlay { get; set; }
-
         // Performance
         public static ConfigEntry<bool> DynamicAI { get; set; }
         public static ConfigEntry<float> DynamicAIRange { get; set; }
         public static ConfigEntry<EDynamicAIRates> DynamicAIRate { get; set; }
         public static ConfigEntry<bool> DynamicAIIgnoreSnipers { get; set; }
         public static ConfigEntry<bool> UseFikaGC { get; set; }
-
-        // Performance | Bot Limits            
-        public static ConfigEntry<bool> EnforcedSpawnLimits { get; set; }
-        public static ConfigEntry<bool> DespawnFurthest { get; set; }
-        public static ConfigEntry<float> DespawnMinimumDistance { get; set; }
-        public static ConfigEntry<int> MaxBotsFactory { get; set; }
-        public static ConfigEntry<int> MaxBotsCustoms { get; set; }
-        public static ConfigEntry<int> MaxBotsInterchange { get; set; }
-        public static ConfigEntry<int> MaxBotsReserve { get; set; }
-        public static ConfigEntry<int> MaxBotsGroundZero { get; set; }
-        public static ConfigEntry<int> MaxBotsWoods { get; set; }
-        public static ConfigEntry<int> MaxBotsStreets { get; set; }
-        public static ConfigEntry<int> MaxBotsShoreline { get; set; }
-        public static ConfigEntry<int> MaxBotsLabs { get; set; }
-        public static ConfigEntry<int> MaxBotsLighthouse { get; set; }
 
         // Network
         public static ConfigEntry<bool> NativeSockets { get; set; }
@@ -457,14 +407,6 @@ namespace Fika.Core
                     }),
                     "Official Version", ref failed, headers);
 
-            DevMode = SetupSetting(advancedDefaultHeader, "Developer Mode", false,
-                new ConfigDescription("Enables developer features", tags: new ConfigurationManagerAttributes()
-                {
-                    IsAdvanced = true,
-                    Category = advancedHeader,
-                    DispName = "Developer Mode"
-                }), "Developer Mode", ref failed, headers);
-
             // Coop
 
             string coopHeader = CleanConfigString(LocaleUtils.BEPINEX_H_COOP.Localized());
@@ -551,396 +493,6 @@ namespace Fika.Core
                 }),
                 "Online Players Scale", ref failed, headers);
 
-            // Coop | Name Plates
-
-            string coopNameplatesHeader = CleanConfigString(LocaleUtils.BEPINEX_H_COOP_NAME_PLATES.Localized());
-            string coopDefaultNamePlatesHeader = "Coop | Name Plates";
-
-            UseNamePlates = SetupSetting(coopDefaultNamePlatesHeader, "Show Player Name Plates", true,
-                new ConfigDescription(LocaleUtils.BEPINEX_USE_NAME_PLATES_D.Localized(), tags: new ConfigurationManagerAttributes()
-                {
-                    Category = coopNameplatesHeader,
-                    DispName = LocaleUtils.BEPINEX_USE_NAME_PLATES_T.Localized(),
-                    Order = 16
-                }),
-                "Show Player Name Plates", ref failed, headers);
-
-            HideHealthBar = SetupSetting(coopDefaultNamePlatesHeader, "Hide Health Bar", false,
-                new ConfigDescription(LocaleUtils.BEPINEX_HIDE_HEALTH_BAR_D.Localized(), tags: new ConfigurationManagerAttributes()
-                {
-                    Category = coopNameplatesHeader,
-                    DispName = LocaleUtils.BEPINEX_HIDE_HEALTH_BAR_T.Localized(),
-                    Order = 15
-                }),
-                "Hide Health Bar", ref failed, headers);
-
-            UseHealthNumber = SetupSetting(coopDefaultNamePlatesHeader, "Show HP% instead of bar", false,
-                new ConfigDescription(LocaleUtils.BEPINEX_USE_PERCENT_D.Localized(), tags: new ConfigurationManagerAttributes()
-                {
-                    Category = coopNameplatesHeader,
-                    DispName = LocaleUtils.BEPINEX_USE_PERCENT_T.Localized(),
-                    Order = 14
-                }),
-                "Show HP% instead of bar", ref failed, headers);
-
-            ShowEffects = SetupSetting(coopDefaultNamePlatesHeader, "Show Effects", true,
-                new ConfigDescription(LocaleUtils.BEPINEX_SHOW_EFFECTS_D.Localized(), tags: new ConfigurationManagerAttributes()
-                {
-                    Category = coopNameplatesHeader,
-                    DispName = LocaleUtils.BEPINEX_SHOW_EFFECTS_T.Localized(),
-                    Order = 13
-                }),
-                "Show Effects", ref failed, headers);
-
-            UsePlateFactionSide = SetupSetting(coopDefaultNamePlatesHeader, "Show Player Faction Icon", true,
-                new ConfigDescription(LocaleUtils.BEPINEX_SHOW_FACTION_ICON_D.Localized(), tags: new ConfigurationManagerAttributes()
-                {
-                    Category = coopNameplatesHeader,
-                    DispName = LocaleUtils.BEPINEX_SHOW_FACTION_ICON_T.Localized(),
-                    Order = 12
-                }),
-                "Show Player Faction Icon", ref failed, headers);
-
-            HideNamePlateInOptic = SetupSetting(coopDefaultNamePlatesHeader, "Hide Name Plate in Optic", true,
-                new ConfigDescription(LocaleUtils.BEPINEX_HIDE_IN_OPTIC_D.Localized(), tags: new ConfigurationManagerAttributes()
-                {
-                    Category = coopNameplatesHeader,
-                    DispName = LocaleUtils.BEPINEX_HIDE_IN_OPTIC_T.Localized(),
-                    Order = 11
-                }),
-                "Hide Name Plate in Optic", ref failed, headers);
-
-            NamePlateUseOpticZoom = SetupSetting(coopDefaultNamePlatesHeader, "Name Plates Use Optic Zoom", true,
-                new ConfigDescription(LocaleUtils.BEPINEX_OPTIC_USE_ZOOM_D.Localized(), tags: new ConfigurationManagerAttributes()
-                {
-                    Category = coopNameplatesHeader,
-                    DispName = LocaleUtils.BEPINEX_OPTIC_USE_ZOOM_T.Localized(),
-                    Order = 10,
-                    IsAdvanced = true
-                }),
-                "Name Plates Use Optic Zoom", ref failed, headers);
-
-            DecreaseOpacityNotLookingAt = SetupSetting(coopDefaultNamePlatesHeader, "Decrease Opacity In Peripheral", true,
-                new ConfigDescription(LocaleUtils.BEPINEX_DEC_OPAC_PERI_D.Localized(), tags: new ConfigurationManagerAttributes()
-                {
-                    Category = coopNameplatesHeader,
-                    DispName = LocaleUtils.BEPINEX_DEC_OPAC_PERI_T.Localized(),
-                    Order = 9
-                }),
-                "Decrease Opacity In Peripheral", ref failed, headers);
-
-            NamePlateScale = SetupSetting(coopDefaultNamePlatesHeader, "Name Plate Scale", 0.22f,
-                new ConfigDescription(LocaleUtils.BEPINEX_NAME_PLATE_SCALE_D.Localized(),
-                new AcceptableValueRange<float>(0.05f, 1f), new ConfigurationManagerAttributes()
-                {
-                    Category = coopNameplatesHeader,
-                    DispName = LocaleUtils.BEPINEX_NAME_PLATE_SCALE_T.Localized(),
-                    Order = 8
-                }),
-                "Name Plate Scale", ref failed, headers);
-
-            OpacityInADS = SetupSetting(coopDefaultNamePlatesHeader, "Opacity in ADS", 0.75f,
-                new ConfigDescription(LocaleUtils.BEPINEX_ADS_OPAC_D.Localized(),
-                new AcceptableValueRange<float>(0.1f, 1f), new ConfigurationManagerAttributes()
-                {
-                    Category = coopNameplatesHeader,
-                    DispName = LocaleUtils.BEPINEX_ADS_OPAC_T.Localized(),
-                    Order = 7
-                }),
-                "Opacity in ADS", ref failed, headers);
-
-            MaxDistanceToShow = SetupSetting(coopDefaultNamePlatesHeader, "Max Distance to Show", 500f,
-                new ConfigDescription(LocaleUtils.BEPINEX_MAX_DISTANCE_D.Localized(),
-                new AcceptableValueRange<float>(10f, 1000f), new ConfigurationManagerAttributes()
-                {
-                    Category = coopNameplatesHeader,
-                    DispName = LocaleUtils.BEPINEX_MAX_DISTANCE_T.Localized(),
-                    Order = 6
-                }),
-                "Max Distance to Show", ref failed, headers);
-
-            MinimumOpacity = SetupSetting(coopDefaultNamePlatesHeader, "Minimum Opacity", 0.1f,
-                new ConfigDescription(LocaleUtils.BEPINEX_MIN_OPAC_D.Localized(),
-                new AcceptableValueRange<float>(0.0f, 1f), new ConfigurationManagerAttributes()
-                {
-                    Category = coopNameplatesHeader,
-                    DispName = LocaleUtils.BEPINEX_MIN_OPAC_T.Localized(),
-                    Order = 5
-                }),
-                "Minimum Opacity", ref failed, headers);
-
-            MinimumNamePlateScale = SetupSetting(coopDefaultNamePlatesHeader, "Minimum Name Plate Scale", 0.01f,
-                new ConfigDescription(LocaleUtils.BEPINEX_MIN_PLATE_SCALE_D.Localized(),
-                new AcceptableValueRange<float>(0.0f, 1f), new ConfigurationManagerAttributes()
-                {
-                    Category = coopNameplatesHeader,
-                    DispName = LocaleUtils.BEPINEX_MIN_PLATE_SCALE_T.Localized(),
-                    Order = 4
-                }),
-                "Minimum Name Plate Scale", ref failed, headers);
-
-            UseOcclusion = SetupSetting(coopDefaultNamePlatesHeader, "Use Occlusion", false,
-                new ConfigDescription(LocaleUtils.BEPINEX_USE_OCCLUSION_D.Localized(), tags: new ConfigurationManagerAttributes()
-                {
-                    Category = coopNameplatesHeader,
-                    DispName = LocaleUtils.BEPINEX_USE_OCCLUSION_T.Localized(),
-                    Order = 3
-                }),
-                "Use Occlusion", ref failed, headers);
-
-            FullHealthColor = SetupSetting(coopDefaultNamePlatesHeader, "Full Health Color", Color.green,
-                new ConfigDescription(LocaleUtils.BEPINEX_HEALTHCOLOR_FULL_D.Localized(), tags: new ConfigurationManagerAttributes()
-                {
-                    Category = coopNameplatesHeader,
-                    DispName = LocaleUtils.BEPINEX_HEALTHCOLOR_FULL_T.Localized(),
-                    Order = 2
-                }),
-                "Full Health Color", ref failed, headers);
-
-            LowHealthColor = SetupSetting(coopDefaultNamePlatesHeader, "Low Health Color", Color.red,
-                new ConfigDescription(LocaleUtils.BEPINEX_HEALTHCOLOR_LOW_D.Localized(), tags: new ConfigurationManagerAttributes()
-                {
-                    Category = coopNameplatesHeader,
-                    DispName = LocaleUtils.BEPINEX_HEALTHCOLOR_LOW_T.Localized(),
-                    Order = 1
-                }),
-                "Low Health Color", ref failed, headers);
-
-            NamePlateTextColor = SetupSetting(coopDefaultNamePlatesHeader, "Name Plate Text Color", Color.white,
-                new ConfigDescription(LocaleUtils.BEPINEX_NAMEPLATECOLOR_D.Localized(), tags: new ConfigurationManagerAttributes()
-                {
-                    Category = coopNameplatesHeader,
-                    DispName = LocaleUtils.BEPINEX_NAMEPLATECOLOR_T.Localized(),
-                    Order = 0
-                }),
-                "Name Plate Text Color", ref failed, headers);
-
-            // Coop | Quest Sharing
-
-            string coopQuestSharingHeader = CleanConfigString(LocaleUtils.BEPINEX_H_COOP_QUEST_SHARING.Localized());
-            string coopDefaultQuestSharingHeader = "Coop | Quest Sharing";
-            bool questSharingEnabled = SharedQuestProgression;
-            string disabledMessage = LocaleUtils.UI_DISABLED_BY_HOST.Localized();
-
-            QuestTypesToShareAndReceive = SetupSetting(coopDefaultQuestSharingHeader, "Quest Types", EQuestSharingTypes.All,
-                new ConfigDescription(questSharingEnabled ? LocaleUtils.BEPINEX_QUEST_TYPES_D.Localized() : disabledMessage, tags: new ConfigurationManagerAttributes()
-                {
-                    Category = coopQuestSharingHeader,
-                    DispName = LocaleUtils.BEPINEX_QUEST_TYPES_T.Localized(),
-                    Order = 4,
-                    ReadOnly = !questSharingEnabled
-                }),
-                "Quest Types", ref failed, headers);
-
-            QuestSharingNotifications = SetupSetting(coopDefaultQuestSharingHeader, "Show Notifications", true,
-                new ConfigDescription(questSharingEnabled ? LocaleUtils.BEPINEX_QS_NOTIFICATIONS_D.Localized() : disabledMessage, tags: new ConfigurationManagerAttributes()
-                {
-                    Category = coopQuestSharingHeader,
-                    DispName = LocaleUtils.BEPINEX_QS_NOTIFICATIONS_T.Localized(),
-                    Order = 3,
-                    ReadOnly = !questSharingEnabled
-                }),
-                "Show Notifications", ref failed, headers);
-
-            EasyKillConditions = SetupSetting(coopDefaultQuestSharingHeader, "Easy Kill Conditions", false,
-                new ConfigDescription(questSharingEnabled ? LocaleUtils.BEPINEX_EASY_KILL_CONDITIONS_D.Localized() : disabledMessage, tags: new ConfigurationManagerAttributes()
-                {
-                    Category = coopQuestSharingHeader,
-                    DispName = LocaleUtils.BEPINEX_EASY_KILL_CONDITIONS_T.Localized(),
-                    Order = 2,
-                    ReadOnly = !questSharingEnabled
-                }),
-                "Easy Kill Conditions", ref failed, headers);
-
-            SharedKillExperience = SetupSetting(coopDefaultQuestSharingHeader, "Shared Kill Experience", false,
-                new ConfigDescription(questSharingEnabled ? LocaleUtils.BEPINEX_SHARED_KILL_XP_D.Localized() : disabledMessage, tags: new ConfigurationManagerAttributes()
-                {
-                    Category = coopQuestSharingHeader,
-                    DispName = LocaleUtils.BEPINEX_SHARED_KILL_XP_T.Localized(),
-                    Order = 1,
-                    ReadOnly = !questSharingEnabled
-                }),
-                "Shared Kill Experience", ref failed, headers);
-
-            SharedBossExperience = SetupSetting(coopDefaultQuestSharingHeader, "Shared Boss Experience", false,
-                new ConfigDescription(questSharingEnabled ? LocaleUtils.BEPINEX_SHARED_BOSS_XP_D.Localized() : disabledMessage, tags: new ConfigurationManagerAttributes()
-                {
-                    Category = coopQuestSharingHeader,
-                    DispName = LocaleUtils.BEPINEX_SHARED_BOSS_XP_T.Localized(),
-                    Order = 0,
-                    ReadOnly = !questSharingEnabled
-                }),
-                "Shared Boss Experience", ref failed, headers);
-
-            // Coop | Pinging
-
-            string coopPingingHeader = CleanConfigString(LocaleUtils.BEPINEX_H_COOP_PINGING.Localized());
-            string coopDefaultPingingHeader = "Coop | Pinging";
-
-            UsePingSystem = SetupSetting(coopDefaultPingingHeader, "Ping System", true,
-                new ConfigDescription(LocaleUtils.BEPINEX_PING_SYSTEM_D.Localized(), tags: new ConfigurationManagerAttributes()
-                {
-                    Category = coopPingingHeader,
-                    DispName = LocaleUtils.BEPINEX_PING_SYSTEM_T.Localized(),
-                    Order = 11
-                }),
-                "Ping System", ref failed, headers);
-
-            PingButton = SetupSetting(coopDefaultPingingHeader, "Ping Button", new KeyboardShortcut(KeyCode.Semicolon),
-                new ConfigDescription(LocaleUtils.BEPINEX_PING_BUTTON_D.Localized(), tags: new ConfigurationManagerAttributes()
-                {
-                    Category = coopPingingHeader,
-                    DispName = LocaleUtils.BEPINEX_PING_BUTTON_T.Localized(),
-                    Order = 10
-                }),
-                "Ping Button", ref failed, headers);
-
-            PingColor = SetupSetting(coopDefaultPingingHeader, "Ping Color", Color.white,
-                new ConfigDescription(LocaleUtils.BEPINEX_PING_COLOR_D.Localized(), tags: new ConfigurationManagerAttributes()
-                {
-                    Category = coopPingingHeader,
-                    DispName = LocaleUtils.BEPINEX_PING_COLOR_T.Localized(),
-                    Order = 9
-                }),
-                "Ping Color", ref failed, headers);
-
-            PingSize = SetupSetting(coopDefaultPingingHeader, "Ping Size", 1f,
-                new ConfigDescription(LocaleUtils.BEPINEX_PING_SIZE_D.Localized(),
-                new AcceptableValueRange<float>(0.1f, 2f), new ConfigurationManagerAttributes()
-                {
-                    Category = coopPingingHeader,
-                    DispName = LocaleUtils.BEPINEX_PING_SIZE_T.Localized(),
-                    Order = 8
-                }),
-                "Ping Size", ref failed, headers);
-
-            PingTime = SetupSetting(coopDefaultPingingHeader, "Ping Time", 3,
-                new ConfigDescription(LocaleUtils.BEPINEX_PING_TIME_D.Localized(),
-                new AcceptableValueRange<int>(2, 10), new ConfigurationManagerAttributes()
-                {
-                    Category = coopPingingHeader,
-                    DispName = LocaleUtils.BEPINEX_PING_TIME_T.Localized(),
-                    Order = 7
-                }),
-                "Ping Time", ref failed, headers);
-
-            PlayPingAnimation = SetupSetting(coopDefaultPingingHeader, "Play Ping Animation", false,
-                new ConfigDescription(LocaleUtils.BEPINEX_PING_ANIMATION_D.Localized(), tags: new ConfigurationManagerAttributes()
-                {
-                    Category = coopPingingHeader,
-                    DispName = LocaleUtils.BEPINEX_PING_ANIMATION_T.Localized(),
-                    Order = 6
-                }),
-                "Play Ping Animation", ref failed, headers);
-
-            ShowPingDuringOptics = SetupSetting(coopDefaultPingingHeader, "Show Ping During Optics", false,
-                new ConfigDescription(LocaleUtils.BEPINEX_PING_OPTICS_D.Localized(), tags: new ConfigurationManagerAttributes()
-                {
-                    Category = coopPingingHeader,
-                    DispName = LocaleUtils.BEPINEX_PING_OPTICS_T.Localized(),
-                    Order = 5
-                }),
-                "Show Ping During Optics", ref failed, headers);
-
-            PingUseOpticZoom = SetupSetting(coopDefaultPingingHeader, "Ping Use Optic Zoom", true,
-                new ConfigDescription(LocaleUtils.BEPINEX_PING_OPTIC_ZOOM_D.Localized(), tags: new ConfigurationManagerAttributes()
-                {
-                    Category = coopPingingHeader,
-                    DispName = LocaleUtils.BEPINEX_PING_OPTIC_ZOOM_T.Localized(),
-                    Order = 4,
-                    IsAdvanced = true
-                }),
-                "Ping Use Optic Zoom", ref failed, headers);
-
-            PingScaleWithDistance = SetupSetting(coopDefaultPingingHeader, "Ping Scale With Distance", true,
-                new ConfigDescription(LocaleUtils.BEPINEX_PING_SCALE_DISTANCE_D.Localized(), tags: new ConfigurationManagerAttributes()
-                {
-                    Category = coopPingingHeader,
-                    DispName = LocaleUtils.BEPINEX_PING_SCALE_DISTANCE_T.Localized(),
-                    Order = 3,
-                    IsAdvanced = true
-                }),
-                "Ping Scale With Distance", ref failed, headers);
-
-            PingMinimumOpacity = SetupSetting(coopDefaultPingingHeader, "Ping Minimum Opacity", 0.05f,
-                new ConfigDescription(LocaleUtils.BEPINEX_PING_MIN_OPAC_D.Localized(),
-                new AcceptableValueRange<float>(0f, 0.5f), new ConfigurationManagerAttributes()
-                {
-                    Category = coopPingingHeader,
-                    DispName = LocaleUtils.BEPINEX_PING_MIN_OPAC_T.Localized(),
-                    Order = 2,
-                    IsAdvanced = true
-                }),
-                "Ping Minimum Opacity", ref failed, headers);
-
-            ShowPingRange = SetupSetting(coopDefaultPingingHeader, "Show Ping Range", false,
-                new ConfigDescription(LocaleUtils.BEPINEX_PING_RANGE_D.Localized(), tags: new ConfigurationManagerAttributes()
-                {
-                    Category = coopPingingHeader,
-                    DispName = LocaleUtils.BEPINEX_PING_RANGE_T.Localized(),
-                    Order = 1
-                }),
-                "Show Ping Range", ref failed, headers);
-
-            PingSound = SetupSetting(coopDefaultPingingHeader, "Ping Sound", EPingSound.SubQuestComplete,
-                new ConfigDescription(LocaleUtils.BEPINEX_PING_SOUND_D.Localized(), tags: new ConfigurationManagerAttributes()
-                {
-                    Category = coopPingingHeader,
-                    DispName = LocaleUtils.BEPINEX_PING_SOUND_T.Localized(),
-                    Order = 0
-                }),
-                "Ping Sound", ref failed, headers);
-
-            // Coop | Debug
-
-            string coopDebugHeader = CleanConfigString(LocaleUtils.BEPINEX_H_COOP_DEBUG.Localized());
-            string coopDefaultDebugHeader = "Coop | Debug";
-
-            FreeCamButton = SetupSetting(coopDefaultDebugHeader, "Free Camera Button", new KeyboardShortcut(KeyCode.F9),
-                new ConfigDescription(CleanConfigString(LocaleUtils.BEPINEX_FREE_CAM_BUTTON_D.Localized()), tags: new ConfigurationManagerAttributes()
-                {
-                    Category = coopDebugHeader,
-                    DispName = LocaleUtils.BEPINEX_FREE_CAM_BUTTON_T.Localized(),
-                    Order = 4
-                }),
-                "Free Camera Button", ref failed, headers);
-
-            AllowSpectateBots = SetupSetting(coopDefaultDebugHeader, "Allow Spectating Bots", true,
-                new ConfigDescription(CleanConfigString(LocaleUtils.BEPINEX_SPECTATE_BOTS_D.Localized()), tags: new ConfigurationManagerAttributes()
-                {
-                    Category = coopDebugHeader,
-                    DispName = LocaleUtils.BEPINEX_SPECTATE_BOTS_T.Localized(),
-                    Order = 3
-                }),
-                "Allow Spectating Bots", ref failed, headers);
-
-            AZERTYMode = SetupSetting(coopDefaultDebugHeader, "AZERTY Mode", false,
-                new ConfigDescription(CleanConfigString(LocaleUtils.BEPINEX_AZERTY_MODE_D.Localized()), tags: new ConfigurationManagerAttributes()
-                {
-                    Category = coopDebugHeader,
-                    DispName = LocaleUtils.BEPINEX_AZERTY_MODE_T.Localized(),
-                    Order = 2
-                }),
-                "AZERTY Mode", ref failed, headers);
-
-            DroneMode = SetupSetting(coopDefaultDebugHeader, "Drone Mode", false,
-                new ConfigDescription(LocaleUtils.BEPINEX_DRONE_MODE_D.Localized(), tags: new ConfigurationManagerAttributes()
-                {
-                    Category = coopDebugHeader,
-                    DispName = LocaleUtils.BEPINEX_DRONE_MODE_T.Localized(),
-                    Order = 1
-                }),
-                "Drone Mode", ref failed, headers);
-
-            KeybindOverlay = SetupSetting(coopDefaultDebugHeader, "Keybind Overlay", true,
-                new ConfigDescription(LocaleUtils.BEPINEX_KEYBIND_OVERLAY_T.Localized(), tags: new ConfigurationManagerAttributes()
-                {
-                    Category = coopDebugHeader,
-                    DispName = LocaleUtils.BEPINEX_KEYBIND_OVERLAY_T.Localized(),
-                    Order = 0
-                }),
-                "Keybind Overlay", ref failed, headers);
-
             // Performance
 
             string performanceHeader = CleanConfigString(LocaleUtils.BEPINEX_H_PERFORMANCE.Localized());
@@ -991,153 +543,6 @@ namespace Fika.Core
                     Order = 0
                 }),
                 "Use Fika GC", ref failed, headers);
-
-            // Performance | Max Bots
-
-            string performanceBotsHeader = CleanConfigString(LocaleUtils.BEPINEX_H_PERFORMANCE_BOTS.Localized());
-            string performanceDefaultBotsHeader = "Performance | Max Bots";
-
-            EnforcedSpawnLimits = SetupSetting(performanceDefaultBotsHeader, "Enforced Spawn Limits", false,
-                new ConfigDescription(LocaleUtils.BEPINEX_ENFORCED_SPAWN_LIMITS_D.Localized(), tags: new ConfigurationManagerAttributes()
-                {
-                    Category = performanceBotsHeader,
-                    DispName = LocaleUtils.BEPINEX_ENFORCED_SPAWN_LIMITS_T.Localized(),
-                    Order = 14
-                }),
-                "Enforced Spawn Limits", ref failed, headers);
-
-            DespawnFurthest = SetupSetting(performanceDefaultBotsHeader, "Despawn Furthest", false,
-                new ConfigDescription(LocaleUtils.BEPINEX_DESPAWN_FURTHEST_D.Localized(), tags: new ConfigurationManagerAttributes()
-                {
-                    Category = performanceBotsHeader,
-                    DispName = LocaleUtils.BEPINEX_DESPAWN_FURTHEST_T.Localized(),
-                    Order = 13
-                }),
-                "Despawn Furthest", ref failed, headers);
-
-            DespawnMinimumDistance = SetupSetting(performanceDefaultBotsHeader, "Despawn Minimum Distance", 200.0f,
-                new ConfigDescription(LocaleUtils.BEPINEX_DESPAWN_MIN_DISTANCE_D.Localized(),
-                new AcceptableValueRange<float>(50f, 3000f), new ConfigurationManagerAttributes()
-                {
-                    Category = performanceBotsHeader,
-                    DispName = LocaleUtils.BEPINEX_DESPAWN_MIN_DISTANCE_T.Localized(),
-                    Order = 12
-                }),
-                "Despawn Minimum Distance", ref failed, headers);
-
-            string maxBotsHeader = CleanConfigString(LocaleUtils.BEPINEX_MAX_BOTS_T.Localized());
-            string maxDefaultBotsHeader = "Max Bots {0}";
-            string maxBotsDescription = LocaleUtils.BEPINEX_MAX_BOTS_D.Localized();
-
-            string factory = "factory4_day".Localized();
-            MaxBotsFactory = SetupSetting(performanceDefaultBotsHeader, string.Format(maxDefaultBotsHeader, "Factory"), 0,
-                new ConfigDescription(string.Format(maxBotsDescription, factory),
-                new AcceptableValueRange<int>(0, 50), new ConfigurationManagerAttributes()
-                {
-                    Category = performanceBotsHeader,
-                    DispName = string.Format(maxBotsHeader, factory),
-                    Order = 11
-                }),
-                "Max Bots Factory", ref failed, headers);
-
-            string customs = "bigmap".Localized();
-            MaxBotsCustoms = SetupSetting(performanceDefaultBotsHeader, string.Format(maxDefaultBotsHeader, "Customs"), 0,
-                new ConfigDescription(string.Format(maxBotsDescription, customs),
-                new AcceptableValueRange<int>(0, 50), new ConfigurationManagerAttributes()
-                {
-                    Category = performanceBotsHeader,
-                    DispName = string.Format(maxBotsHeader, customs),
-                    Order = 10
-                }),
-                "Max Bots Customs", ref failed, headers);
-
-            string interchange = "interchange".Localized();
-            MaxBotsInterchange = SetupSetting(performanceDefaultBotsHeader, string.Format(maxDefaultBotsHeader, "Interchange"), 0,
-                new ConfigDescription(string.Format(maxBotsDescription, interchange),
-                new AcceptableValueRange<int>(0, 50), new ConfigurationManagerAttributes()
-                {
-                    Category = performanceBotsHeader,
-                    DispName = string.Format(maxBotsHeader, interchange),
-                    Order = 8
-                }),
-                "Max Bots Interchange", ref failed, headers);
-
-            string reserve = "rezervbase".Localized();
-            MaxBotsReserve = SetupSetting(performanceDefaultBotsHeader, string.Format(maxDefaultBotsHeader, "Reserve"), 0,
-                new ConfigDescription(string.Format(maxBotsDescription, reserve),
-                new AcceptableValueRange<int>(0, 50), new ConfigurationManagerAttributes()
-                {
-                    Category = performanceBotsHeader,
-                    DispName = string.Format(maxBotsHeader, reserve),
-                    Order = 7
-                }),
-                "Max Bots Reserve", ref failed, headers);
-
-            string woods = "woods".Localized();
-            MaxBotsWoods = SetupSetting(performanceDefaultBotsHeader, string.Format(maxDefaultBotsHeader, "Woods"), 0,
-                new ConfigDescription(string.Format(maxBotsDescription, woods),
-                new AcceptableValueRange<int>(0, 50), new ConfigurationManagerAttributes()
-                {
-                    Category = performanceBotsHeader,
-                    DispName = string.Format(maxBotsHeader, woods),
-                    Order = 6
-                }),
-                "Max Bots Woods", ref failed, headers);
-
-            string shoreline = "shoreline".Localized();
-            MaxBotsShoreline = SetupSetting(performanceDefaultBotsHeader, string.Format(maxDefaultBotsHeader, "Shoreline"), 0,
-                new ConfigDescription(string.Format(maxBotsDescription, shoreline),
-                new AcceptableValueRange<int>(0, 50), new ConfigurationManagerAttributes()
-                {
-                    Category = performanceBotsHeader,
-                    DispName = string.Format(maxBotsHeader, shoreline),
-                    Order = 5
-                }),
-                "Max Bots Shoreline", ref failed, headers);
-
-            string streets = "tarkovstreets".Localized();
-            MaxBotsStreets = SetupSetting(performanceDefaultBotsHeader, string.Format(maxDefaultBotsHeader, "Streets of Tarkov"), 0,
-                new ConfigDescription(string.Format(maxBotsDescription, streets),
-                new AcceptableValueRange<int>(0, 50), new ConfigurationManagerAttributes()
-                {
-                    Category = performanceBotsHeader,
-                    DispName = string.Format(maxBotsHeader, streets),
-                    Order = 4
-                }),
-                "Max Bots Streets of Tarkov", ref failed, headers);
-
-            string groundZero = "sandbox".Localized();
-            MaxBotsGroundZero = SetupSetting(performanceDefaultBotsHeader, string.Format(maxDefaultBotsHeader, "Ground Zero"), 0,
-                new ConfigDescription(string.Format(maxBotsDescription, groundZero),
-                new AcceptableValueRange<int>(0, 50), new ConfigurationManagerAttributes()
-                {
-                    Category = performanceBotsHeader,
-                    DispName = string.Format(maxBotsHeader, groundZero),
-                    Order = 3
-                }),
-                "Max Bots Ground Zero", ref failed, headers);
-
-            string labs = "laboratory".Localized();
-            MaxBotsLabs = SetupSetting(performanceDefaultBotsHeader, string.Format(maxDefaultBotsHeader, "Labs"), 0,
-                new ConfigDescription(string.Format(maxBotsDescription, labs),
-                new AcceptableValueRange<int>(0, 50), new ConfigurationManagerAttributes()
-                {
-                    Category = performanceBotsHeader,
-                    DispName = string.Format(maxBotsHeader, labs),
-                    Order = 2
-                }),
-                "Max Bots Labs", ref failed, headers);
-
-            string lighthouse = "lighthouse".Localized();
-            MaxBotsLighthouse = SetupSetting(performanceDefaultBotsHeader, string.Format(maxDefaultBotsHeader, "Lighthouse"), 0,
-                new ConfigDescription(string.Format(maxBotsDescription, lighthouse),
-                new AcceptableValueRange<int>(0, 50), new ConfigurationManagerAttributes()
-                {
-                    Category = performanceBotsHeader,
-                    DispName = string.Format(maxBotsHeader, lighthouse),
-                    Order = 1
-                }),
-                "Max Bots Lighthouse", ref failed, headers);
 
             // Network
 
@@ -1304,6 +709,39 @@ namespace Fika.Core
             {
                 Instance.FikaLogger.LogError("GetLocalAddresses: " + ex.Message);
                 return [.. ips];
+            }
+        }
+
+        public string GetVPNIP()
+        {
+            string vpnip = null;
+
+            try
+            {
+                foreach (NetworkInterface networkInterface in NetworkInterface.GetAllNetworkInterfaces())
+                {
+                    foreach (UnicastIPAddressInformation ip in networkInterface.GetIPProperties().UnicastAddresses)
+                    {
+                        if (!networkInterface.Description.Contains("Radmin VPN"))
+                        {
+                            continue;
+                        }
+
+                        if (!ip.IsDnsEligible)
+                        {
+                            continue;
+                        }
+
+                        vpnip = ip.Address.ToString();
+                    }
+                }
+
+                return vpnip;
+            }
+            catch (Exception ex)
+            {
+                Instance.FikaLogger.LogError("GetLocalAddresses: " + ex.Message);
+                return vpnip;
             }
         }
 
