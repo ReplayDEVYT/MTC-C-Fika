@@ -1,4 +1,4 @@
-﻿using Comfort.Common;
+using Comfort.Common;
 using EFT;
 using EFT.Communications;
 using EFT.Game.Spawning;
@@ -51,8 +51,6 @@ namespace Fika.Core.Coop.Patches
 
             ISpawnPoint spawnpoint = null;
 
-            if (!player.IsYourPlayer || player.IsAI) { return false; }
-
             try
             {
                 spawnpoint = CoopGame.Instance.SpawnSystem.SelectSpawnPoint(ESpawnCategory.Player, profile.Info.Side, null, null, null, null, profile.Id);
@@ -62,31 +60,12 @@ namespace Fika.Core.Coop.Patches
                 Logger.LogError($"Error selecting spawn point: {ex}");
             }
 
+            if (!player.IsYourPlayer || player.IsAI) { return false; }
+
             try
             {
                 player.Transform.position = spawnpoint.Position;
                 player.Transform.rotation = spawnpoint.Rotation;
-
-                player.MovementContext.ReleaseDoorIfInteractingWithOne();
-
-                if (player.MovementContext.StationaryWeapon != null)
-                {
-                    player.MovementContext.StationaryWeapon.Show();
-                    player.ReleaseHand();
-                }
-
-                GClass3756.ReleaseBeginSample("Player.OnDead.SoundWork", "OnDead");
-                try
-                {
-                    player.Speaker.Play(EPhraseTrigger.OnDeath, player.HealthStatus, demand: true);
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogError($"Error in Player.OnDead.SoundWork: {ex}");
-                }
-
-                player.InventoryController.UnregisterView(player);
-                player.PlayDeathSound();
 
                 RespawnHelper.DelayedAction(() =>
                 {
@@ -100,6 +79,8 @@ namespace Fika.Core.Coop.Patches
 
                     new RespawnHelper().RepairAll(player);
                 }, 0.05f);
+
+                PlayerOnDeadFixes(player);
 
                 NotifyRespawn();
             }
@@ -120,6 +101,30 @@ namespace Fika.Core.Coop.Patches
                 Singleton<GUISounds>.Instance.PlayUISound(EUISoundType.PlayerIsDead);
                 LastMessage = DateTime.Now;
             }
+        }
+
+        private static void PlayerOnDeadFixes(Player player)
+        {
+            player.MovementContext.ReleaseDoorIfInteractingWithOne();
+
+            if (player.MovementContext.StationaryWeapon != null)
+            {
+                player.MovementContext.StationaryWeapon.Show();
+                player.ReleaseHand();
+            }
+
+            GClass3756.ReleaseBeginSample("Player.OnDead.SoundWork", "OnDead");
+            try
+            {
+                player.Speaker.Play(EPhraseTrigger.OnDeath, player.HealthStatus, demand: true);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Error in Player.OnDead.SoundWork: {ex}");
+            }
+
+            player.InventoryController.UnregisterView(player);
+            player.PlayDeathSound();
         }
     }
 }
