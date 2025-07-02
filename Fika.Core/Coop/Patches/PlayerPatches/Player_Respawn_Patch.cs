@@ -1,4 +1,4 @@
-﻿using Comfort.Common;
+using Comfort.Common;
 using EFT;
 using EFT.Communications;
 using EFT.Game.Spawning;
@@ -64,13 +64,8 @@ namespace Fika.Core.Coop.Patches
 
             try
             {
-
-                NotifyRespawn();
-
                 player.Transform.position = spawnpoint.Position;
                 player.Transform.rotation = spawnpoint.Rotation;
-
-                PlayerOnDeadFixes(player);
 
                 RespawnHelper.DelayedAction(() =>
                 {
@@ -84,6 +79,10 @@ namespace Fika.Core.Coop.Patches
 
                     new RespawnHelper().RepairAll(player);
                 }, 0.05f);
+
+                PlayerOnDeadFixes(player);
+
+                NotifyRespawn();
             }
             catch (Exception ex)
             {
