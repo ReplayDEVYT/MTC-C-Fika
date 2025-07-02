@@ -3,6 +3,7 @@ using EFT;
 using EFT.Communications;
 using EFT.Game.Spawning;
 using EFT.HealthSystem;
+using EFT.InventoryLogic;
 using EFT.UI;
 using Fika.Core.Coop.Components;
 using Fika.Core.Coop.GameMode;
@@ -18,6 +19,7 @@ using System.Reflection;
 using System.Reflection.Emit;
 using System.Threading.Tasks;
 using UnityEngine;
+using BepInEx.Logging;
 
 namespace Fika.Core.Coop.Patches
 {
@@ -46,8 +48,10 @@ namespace Fika.Core.Coop.Patches
             Player player = __instance.Player;
 
             Profile profile = player.Profile;
-            
+
             ISpawnPoint spawnpoint = null;
+
+            new RespawnHelper().RepairAll(player.InventoryController);
 
             try
             {
@@ -62,36 +66,13 @@ namespace Fika.Core.Coop.Patches
 
             try
             {
-                if (DateTime.Now - LastMessage > TimeSpan.FromSeconds(2))
-                {
-                    Respawns++;
-                    NotificationManagerClass.DisplayMessageNotification($"Respawns: {Respawns}", ENotificationDurationType.Default, ENotificationIconType.Alert, UnityEngine.Color.white);
-                    Singleton<GUISounds>.Instance.PlayUISound(EUISoundType.PlayerIsDead);
-                    LastMessage = DateTime.Now;
-                }
+
+                NotifyRespawn();
+
                 player.Transform.position = spawnpoint.Position;
                 player.Transform.rotation = spawnpoint.Rotation;
 
-                player.MovementContext.ReleaseDoorIfInteractingWithOne();
-
-                if (player.MovementContext.StationaryWeapon != null)
-                {
-                    player.MovementContext.StationaryWeapon.Show();
-                    player.ReleaseHand();
-                }
-
-                GClass3756.ReleaseBeginSample("Player.OnDead.SoundWork", "OnDead");
-                try
-                {
-                    player.Speaker.Play(EPhraseTrigger.OnDeath, player.HealthStatus, demand: true);
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogError($"Error in Player.OnDead.SoundWork: {ex}");
-                }
-
-                player.InventoryController.UnregisterView(player);
-                player.PlayDeathSound();
+                PlayerOnDeadFixes(player);
 
                 RespawnHelper.DelayedAction(() =>
                 {
@@ -110,6 +91,41 @@ namespace Fika.Core.Coop.Patches
             }
 
             return false;
+        }
+
+        private static void NotifyRespawn()
+        {
+            if (DateTime.Now - LastMessage > TimeSpan.FromSeconds(2))
+            {
+                Respawns++;
+                NotificationManagerClass.DisplayMessageNotification($"Respawns: {Respawns}", ENotificationDurationType.Default, ENotificationIconType.Alert, UnityEngine.Color.white);
+                Singleton<GUISounds>.Instance.PlayUISound(EUISoundType.PlayerIsDead);
+                LastMessage = DateTime.Now;
+            }
+        }
+
+        private static void PlayerOnDeadFixes(Player player)
+        {
+            player.MovementContext.ReleaseDoorIfInteractingWithOne();
+
+            if (player.MovementContext.StationaryWeapon != null)
+            {
+                player.MovementContext.StationaryWeapon.Show();
+                player.ReleaseHand();
+            }
+
+            GClass3756.ReleaseBeginSample("Player.OnDead.SoundWork", "OnDead");
+            try
+            {
+                player.Speaker.Play(EPhraseTrigger.OnDeath, player.HealthStatus, demand: true);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Error in Player.OnDead.SoundWork: {ex}");
+            }
+
+            player.InventoryController.UnregisterView(player);
+            player.PlayDeathSound();
         }
     }
 }
