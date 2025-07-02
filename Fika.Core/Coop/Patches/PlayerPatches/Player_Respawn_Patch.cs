@@ -64,13 +64,12 @@ namespace Fika.Core.Coop.Patches
 
             try
             {
-
-                NotifyRespawn();
-
                 player.Transform.position = spawnpoint.Position;
                 player.Transform.rotation = spawnpoint.Rotation;
 
                 PlayerOnDeadFixes(player);
+
+                NotifyRespawn();
 
                 RespawnHelper.DelayedAction(() =>
                 {
