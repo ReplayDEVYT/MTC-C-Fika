@@ -1,6 +1,6 @@
 WHAT TO DO:
 
-- armor repairs on death
+- armor repairs on death (done)
 - flea has max durability items
 - add back mods
 
@@ -9,3 +9,4 @@ LATER PATCHES:
 - kills and deaths count
 - achievements
 - skins
+- discord webhook

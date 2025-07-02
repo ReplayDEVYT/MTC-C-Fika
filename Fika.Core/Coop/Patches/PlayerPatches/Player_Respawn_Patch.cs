@@ -51,8 +51,6 @@ namespace Fika.Core.Coop.Patches
 
             ISpawnPoint spawnpoint = null;
 
-            new RespawnHelper().RepairAll(player.InventoryController);
-
             try
             {
                 spawnpoint = CoopGame.Instance.SpawnSystem.SelectSpawnPoint(ESpawnCategory.Player, profile.Info.Side, null, null, null, null, profile.Id);
@@ -83,6 +81,8 @@ namespace Fika.Core.Coop.Patches
                     __instance.RestoreFullHealth();
                     __instance.DoPainKiller();
                     __instance.DoContusion(2, 10);
+
+                    new RespawnHelper().RepairAll(player);
                 }, 0.05f);
             }
             catch (Exception ex)
