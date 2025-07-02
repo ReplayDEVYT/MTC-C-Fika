@@ -67,10 +67,6 @@ namespace Fika.Core.Coop.Patches
                 player.Transform.position = spawnpoint.Position;
                 player.Transform.rotation = spawnpoint.Rotation;
 
-                PlayerOnDeadFixes(player);
-
-                NotifyRespawn();
-
                 RespawnHelper.DelayedAction(() =>
                 {
                     foreach (EBodyPart BodyPart in Enum.GetValues(typeof(EBodyPart)))
@@ -83,6 +79,10 @@ namespace Fika.Core.Coop.Patches
 
                     new RespawnHelper().RepairAll(player);
                 }, 0.05f);
+
+                PlayerOnDeadFixes(player);
+
+                NotifyRespawn();
             }
             catch (Exception ex)
             {
