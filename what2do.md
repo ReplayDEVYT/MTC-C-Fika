@@ -1,7 +1,7 @@
 WHAT TO DO:
 
 - armor repairs on death (done)
-- flea has max durability items
+- flea has max durability items (done)
 - add back mods
 
 

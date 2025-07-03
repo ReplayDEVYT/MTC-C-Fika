@@ -1,4 +1,4 @@
-using Comfort.Common;
+﻿using Comfort.Common;
 using EFT;
 using EFT.Communications;
 using EFT.Game.Spawning;
@@ -50,23 +50,33 @@ namespace Fika.Core.Coop.Patches
             Profile profile = player.Profile;
 
             ISpawnPoint spawnpoint = null;
-
-            try
-            {
-                spawnpoint = CoopGame.Instance.SpawnSystem.SelectSpawnPoint(ESpawnCategory.Player, profile.Info.Side, null, null, null, null, profile.Id);
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"Error selecting spawn point: {ex}");
-            }
+            Vector3 togetherSpawnPoint = Vector3.zero;
 
             if (!player.IsYourPlayer || player.IsAI) { return false; }
 
-            try
+            if (CoopGame.Instance.RaidSettings.PlayersSpawnPlace == EPlayersSpawnPlace.SamePlace)
             {
+                togetherSpawnPoint = CoopGame.Instance.ClientSpawnPosition;
+
+                player.Transform.position = togetherSpawnPoint;
+            }
+            else
+            {
+                try
+                {
+                    spawnpoint = CoopGame.Instance.SpawnSystem.SelectSpawnPoint(ESpawnCategory.Player, profile.Info.Side, null, null, null, null, profile.Id);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"Error selecting spawn point: {ex}");
+                }
+
                 player.Transform.position = spawnpoint.Position;
                 player.Transform.rotation = spawnpoint.Rotation;
+            }
 
+            try
+            {
                 RespawnHelper.DelayedAction(() =>
                 {
                     foreach (EBodyPart BodyPart in Enum.GetValues(typeof(EBodyPart)))
